@@ -45,6 +45,10 @@ The initial parser benchmark must compare at least:
 
 No parser is considered the production default until it wins on the project benchmark corpus.
 
+## Design direction
+
+MamaGift uses a **Claude-inspired interaction model** for chat and a **Granola-inspired warm/editorial visual language**, while remaining document-first and provenance-first. The binding frontend design contract is [`docs/10_DESIGN_SYSTEM.md`](docs/10_DESIGN_SYSTEM.md).
+
 ## Documentation
 
 Read in this order:
@@ -59,6 +63,7 @@ Read in this order:
 8. [`docs/07_DATA_AND_CONTINUAL_LEARNING.md`](docs/07_DATA_AND_CONTINUAL_LEARNING.md)
 9. [`docs/08_API_AND_DATA_CONTRACTS.md`](docs/08_API_AND_DATA_CONTRACTS.md)
 10. [`docs/09_CODEX_EXECUTION.md`](docs/09_CODEX_EXECUTION.md)
+11. [`docs/10_DESIGN_SYSTEM.md`](docs/10_DESIGN_SYSTEM.md)
 
 ## Phase rule
 
