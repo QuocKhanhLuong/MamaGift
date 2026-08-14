@@ -1,0 +1,1 @@
+"""MamaGift FastAPI application package."""

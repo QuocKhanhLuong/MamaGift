@@ -1,8 +1,10 @@
 # MamaGift Responsive States
 
-**Status:** Draft design handoff — requires user review before implementation authority.
+**Status:** Approved design handoff.
 
-**Scope:** Desktop, tablet, and mobile layout states for the information architecture, document flow, and Phase 4 single-document chat. This is a responsive behavior contract, not application code or a commitment to a native mobile app.
+**Scope:** Desktop, tablet, and mobile layout states for the information architecture, document flow, and the feature-gated single-document assistant. This is a responsive behavior contract, not application code or a commitment to a native mobile app.
+
+**Internal phase note:** Phase labels below are implementation-scope annotations only. They must never appear in product navigation, controls, empty states, or other user-facing copy.
 
 ## 1. Responsive principles
 
@@ -20,9 +22,9 @@ This document refines the breakpoints and panel rules in `docs/10_DESIGN_SYSTEM.
 
 | Name | Viewport | Primary arrangement | Main use |
 |---|---:|---|---|
-| Desktop | `>= 1200px` | Full shell; three-pane document workspace when active | Compare source, structured text/details, and assistant at once |
-| Tablet | `768–1199px` | Two active panes; rails/details become drawers or sheets | Read source and assistant without crowding |
-| Mobile | `< 768px` | One active surface: `Văn bản`, `Trợ lý`, or `Chi tiết` | Focused reading and one-tap switching |
+| Desktop | `>= 1200px` | Full shell; verification or assistant workspace | Compare source with parsed/details, or source with assistant when enabled |
+| Tablet | `768–1199px` | Two active panes; rails/details become drawers or sheets | Read source with parsed/details, or source with assistant when enabled |
+| Mobile | `< 768px` | One active surface: `Văn bản` or `Chi tiết`; add `Trợ lý` only when enabled | Focused reading and one-tap switching |
 
 The exact CSS breakpoint may be tuned during implementation, but the three behavioral modes must remain intentional and testable.
 
@@ -34,9 +36,8 @@ The exact CSS breakpoint may be tuned during implementation, but the three behav
 +----------------------+-----------------------------------------------+
 | MamaGift             | page context                         [profile] |
 |----------------------|-----------------------------------------------|
-| + Trợ lý             |                                               |
 |   Văn bản            |              ACTIVE WORKSPACE                |
-|   Gần đây            |                                               |
+|     Gần đây (bộ lọc) |                                               |
 |                      |                                               |
 | [thu gọn rail]       |                                               |
 +----------------------+-----------------------------------------------+
@@ -46,6 +47,7 @@ The exact CSS breakpoint may be tuned during implementation, but the three behav
 - Main workspace: centered content; no dashboard KPI cards.
 - Selected navigation uses a warm subtle surface, not saturated color.
 - On a document, title/number and status remain visible near the workspace header.
+- The indented `Gần đây (bộ lọc)` row is a grouping/filter inside `Văn bản`, never a sibling route or top-level destination.
 
 ### 3.2 Tablet shell
 
@@ -73,11 +75,11 @@ The exact CSS breakpoint may be tuned during implementation, but the three behav
 |              ACTIVE SURFACE              |
 |                                          |
 |------------------------------------------|
-| [Văn bản]       [Trợ lý]       [Chi tiết]|
+| [Văn bản]                  [Chi tiết]    |
 +------------------------------------------+
 ```
 
-- Use a single active surface; bottom/tab controls are direct, named, and touch-safe.
+- Use a single active surface; bottom/tab controls are direct, named, and touch-safe. Add a `Trợ lý` tab only when the assistant capability is enabled and a document is selected.
 - The selected document title is shortened visually only; full title remains available as accessible text/details.
 - System/browser back follows the context stack defined in `01_INFORMATION_ARCHITECTURE.md`.
 
@@ -90,10 +92,11 @@ This table is the implementation index for the named flows. Each row points to a
 | D-01 Archive | Rail + library rows | Library surface + drawer rail | Full-width rows + filter sheet |
 | D-02 Upload | Centered drawer/dialog | Sheet or centered dialog | Full-screen/bottom sheet |
 | D-03 Processing | Status detail beside/list context | Status active surface | Vertical status timeline |
-| D-04 Document workspace | Rail + source dominant + assistant | Source + assistant; rail/details drawers | `Văn bản` / `Trợ lý` / `Chi tiết` surfaces |
+| D-04 Verification workspace | Rail + Original PDF + parsed/details | Original PDF + parsed/details | `Văn bản` / `Chi tiết` |
+| D-04 Assistant workspace | Rail + source + assistant (enabled) | Source + assistant; parsed/details drawer | Add `Trợ lý` only when enabled |
 | D-05 Correction | Details beside source | Details sheet over source | Dedicated details form/tab |
 | D-06 Retry/reprocess | Inline status action | Full-width status action | One primary retry CTA |
-| C-01 Assistant entry | Centered thread or right pane | Assistant pane | `Trợ lý` surface |
+| C-01 Assistant entry | Centered thread or right pane when enabled | Assistant pane when enabled | `Trợ lý` only when enabled |
 | C-02 Question/composer | Sticky composer under thread | Composer spans assistant pane | Composer above keyboard |
 | C-03 Quick actions | Compact chips | Wrapped chips | Stacked/two-column touch chips |
 | C-04 Answer/citation | Prose + source pane | Prose + source switch/sheet | Prose + source surface |
@@ -101,7 +104,7 @@ This table is the implementation index for the named flows. Each row points to a
 | C-06 AI offline/error | Inline status; source remains | Status in assistant pane | Status above composer |
 | C-07 Change document | Picker sheet/rail | Picker drawer | Full-screen picker |
 
-## 5. R-01 — Archive and recent list (D-01)
+## 5. R-01 — Archive and recent grouping (D-01)
 
 ### Desktop
 
@@ -236,69 +239,121 @@ Máy xử lý tạm thời không kết nối. Văn bản sẽ được thử l�
 
 ## 8. R-04 — Document workspace (D-04)
 
-### Desktop: full evidence workspace
+### Desktop verification workspace (default)
 
 ```text
 +------------+-----------------------------------+---------------------+
-| Document   | SOURCE / ORIGINAL PDF             | ASSISTANT (P4)      |
-| rail       |                                   |                     |
-|            | page controls                    | answer/thread       |
+| VĂN BẢN    | SOURCE / ORIGINAL PDF             | PARSED / DETAILS    |
+| Document   |                                   |                     |
+| rail       | page controls                    | metadata + review   |
+| [recent]   |                                   |                     |
+|            | page image + source highlight    | correction          |
 |            |                                   |                     |
-|            | page image + source highlight    | citations           |
-|            |                                   |                     |
-|            | structured representation        | composer            |
+|            |                                   | parsed hierarchy    |
 +------------+-----------------------------------+---------------------+
 ```
 
-- Source pane remains dominant and can expand when a rail collapses.
-- Assistant is 360–440px and never overlays the source at normal desktop widths.
-- Metadata/details may be a secondary column or contained drawer, but source remains one action away.
+Implementation contract: `Document rail | Original PDF | Parsed content / metadata / correction`.
+
+- Source pane remains dominant and can expand when the rail collapses.
+- Parsed content/details occupy the third column; there is no assistant pane in this default verification state.
 - Panel collapse changes width, not context; selected page/block remains focused.
 
-### Tablet: two-pane comparison
+### Desktop assistant workspace (feature-enabled)
+
+```text
++------------+-----------------------------------+---------------------+
+| VĂN BẢN    | SOURCE / ORIGINAL PDF             | TRỢ LÝ              |
+| Document   |                                   |                     |
+| rail       | page controls                    | answer/thread       |
+| [recent]   |                                   | citations           |
+|            | page image + source highlight    |                     |
+|            |                                   | [Chọn văn bản]     |
+|            |                                   | composer            |
++------------+-----------------------------------+---------------------+
+```
+
+Implementation contract: `Document rail | Original PDF | Assistant`.
+
+- The assistant pane is 360–440px and never overlays the source at normal desktop widths.
+- Parsed content/details become a secondary tab or drawer while the assistant is active.
+- `Trợ lý` is shown only after the capability gate is enabled; it is never rendered as a disabled placeholder.
+
+### Tablet verification workspace
 
 ```text
 +--------------------------------------------------+
 | [☰] Công văn 142                    [Chi tiết]   |
 |--------------------------------------------------|
-|                    SOURCE                        |
+|                    ORIGINAL PDF                 |
+|                                                  |
+| [Nguồn]                 [Nội dung đã đọc]       |
++--------------------------------------------------+
+```
+
+- Use `Original PDF + parsed content/details`; the document rail is a drawer.
+- Metadata and correction may open as a `Chi tiết` sheet.
+- Citation activation focuses source; returning switches back to the originating field context.
+
+### Tablet assistant workspace (feature-enabled)
+
+```text
++--------------------------------------------------+
+| [☰] Công văn 142                    [Chi tiết]   |
+|--------------------------------------------------|
+|                    ORIGINAL PDF                 |
 |                                                  |
 | [Nguồn]                         [Trợ lý]         |
 +--------------------------------------------------+
 ```
 
-- Keep source and assistant as the two primary panes.
-- Structured representation and metadata open as a sheet/drawer from `Chi tiết`.
-- Citation activation focuses source; returning switches back to the previous assistant/field context.
+- Use `Original PDF + assistant`; parsed content/details open in the `Chi tiết` drawer.
+- Citation activation focuses source; returning switches back to the originating answer context.
 
-### Mobile: one active surface
+### Mobile verification workspace
 
 ```text
 +------------------------------------------+
 | [←] Công văn 142                         |
 |------------------------------------------|
-|              SOURCE PAGE                 |
+|              ORIGINAL PDF                |
 |        [highlighted block]               |
 |------------------------------------------|
-| [Văn bản]       [Trợ lý]       [Chi tiết]|
+| [Văn bản]                  [Chi tiết]    |
 +------------------------------------------+
 ```
 
 - `Văn bản` is the default after opening a document or citation.
-- `Trợ lý` opens the single-document thread; the document title remains in context.
 - `Chi tiết` opens metadata/confidence/correction; source link returns to the exact page/block.
+- A `Trợ lý` tab is added only when enabled and a document is selected.
 - System back from a citation returns to the answer; back from the document returns to archive with list state preserved.
+
+### Mobile assistant workspace (feature-enabled)
+
+```text
++------------------------------------------+
+| [←] Công văn 142                         |
+|------------------------------------------|
+|              ORIGINAL PDF                |
+|        [highlighted block]               |
+|------------------------------------------|
+| [Văn bản] [Trợ lý]        [Chi tiết]     |
++------------------------------------------+
+```
+
+- `Trợ lý` opens the selected-document thread; parsed content/details remain in `Chi tiết`.
+- A citation always opens `Văn bản` with page/block focus and exposes `Quay lại câu trả lời`.
 
 ### Workspace states at all widths
 
 | State | Desktop | Tablet | Mobile |
 |---|---|---|---|
 | Source loading | Source skeleton in dominant pane | Source active surface skeleton | Full-screen source skeleton |
-| Structured loading | Secondary skeleton beside source | Details/structured sheet loading | `Chi tiết` loading tab |
+| Parsed/details loading | Secondary skeleton beside source | Details/structured sheet loading | `Chi tiết` loading tab |
 | No blocks | Original remains visible; message in structured pane | Source + empty structured sheet | Source + `Chưa có nội dung cấu trúc` |
 | Source unavailable | Error in source pane, structured text may remain | Error active surface + details/source text fallback | Error surface + back/details actions |
-| Ready | Compare source/structure; citations focus source | Switch panes; preserve focus | Tabs preserve page/block context |
-| AI offline | Assistant status only; source remains usable | Status in assistant pane | Status above composer; source tab remains available |
+| Ready | Compare source/parsed content; citations focus source | Switch panes; preserve focus | Surfaces preserve page/block context |
+| AI offline | Verification workspace remains usable; assistant unavailable | Status appears only if assistant is enabled | Status appears only in the enabled assistant surface; source remains available |
 
 ## 9. R-05 — Details and correction (D-05)
 
@@ -335,7 +390,9 @@ Nguồn: Trang 3                 [Đi tới nguồn]
 - Null source is labelled `Chưa có nguồn xác định`; no invented page number.
 - Raw extraction is not presented as deleted or rewritten.
 
-## 10. R-06 — Chat and composer (C-01–C-07)
+## 10. R-06 — Chat and composer (C-01–C-07, feature-enabled)
+
+The chat surface is conditional. Before the assistant capability is enabled, render the verification workspace only; do not show a dead `Trợ lý` nav item, tab, or composer.
 
 ### Desktop
 
@@ -347,7 +404,7 @@ Nguồn: Trang 3                 [Đi tới nguồn]
 |                                          |
 | +--------------------------------------+ |
 | | Hỏi về văn bản…                     | |
-| | [đính kèm/đổi]                 [Gửi]| |
+| | [Chọn văn bản]                 [Gửi]| |
 | +--------------------------------------+ |
 +------------------------------------------+
 ```
@@ -374,14 +431,14 @@ Nguồn: Trang 3                 [Đi tới nguồn]
 |                                          |
 |------------------------------------------|
 | Hỏi về văn bản…                 [Gửi ↑]  |
-| [Đính kèm / đổi văn bản]                 |
+| [Chọn văn bản]                            |
 |------------------------------------------|
-| [Văn bản]       [Trợ lý]       [Chi tiết]|
+| [Văn bản] [Trợ lý]        [Chi tiết]     |
 +------------------------------------------+
 ```
 
 - Composer sits above the virtual keyboard and safe area.
-- Send/attachment/retry/citation controls are approximately 44px targets.
+- Send/`Chọn văn bản`/retry/citation controls are approximately 44px targets.
 - Long answer prose remains at least 16px with comfortable line height.
 - Source citation opens the `Văn bản` surface and shows `Quay lại câu trả lời`.
 
@@ -468,7 +525,7 @@ If `citation_id`, `document_id`, `page_number`, or known `block_ids` cannot reso
 ### Success
 
 - `Sẵn sàng`, `Đã sửa`, and `Đã nhận văn bản` are text states with clear next actions.
-- Success does not imply a later-phase capability: a document being `READY` does not automatically mean archive-wide search or Phase 4 Q&A is enabled.
+- Success does not imply a later capability: a document being `READY` does not automatically enable archive-wide search or the assistant.
 
 ## 13. Accessibility and interaction invariants
 
@@ -484,7 +541,12 @@ If `citation_id`, `document_id`, `page_number`, or known `block_ids` cannot reso
 
 ## 14. Responsive implementation checklist
 
-- [ ] User has reviewed and approved this draft.
+- [x] Reviewed UX corrections are applied; this is an approved design handoff.
+- [ ] Before assistant enablement, `Trợ lý` is absent from navigation, tabs, and controls.
+- [ ] Recent documents appear only as a grouping/filter inside `Văn bản`.
+- [ ] Verification workspace is `Document rail | Original PDF | Parsed content / metadata / correction`.
+- [ ] Assistant workspace is `Document rail | Original PDF | Assistant`, with parsed/details secondary when active.
+- [ ] Context-changing actions use `Chọn văn bản`.
 - [ ] Desktop uses source-dominant three-pane behavior only at widths where it remains readable.
 - [ ] Tablet uses two panes plus drawers/sheets, not three squeezed columns.
 - [ ] Mobile uses one active surface with preserved document/page/citation context.

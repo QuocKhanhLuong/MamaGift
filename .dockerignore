@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+apps/web/node_modules
+apps/web/dist
+infra/compose/postgres-data
+*.db

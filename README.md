@@ -69,6 +69,10 @@ Read in this order:
 
 Every implementation phase has exactly one `/goal`, explicit non-goals, acceptance criteria, required tests, and a CI gate. Codex must not silently pull work from later phases into the current phase.
 
+## Development foundation
+
+The Phase 0 repository foundation is documented in [`docs/SETUP.md`](docs/SETUP.md). It provides locked Python/JavaScript dependencies, a React/Vite health screen, a FastAPI health endpoint, PostgreSQL migrations, Docker Compose, and a deterministic fake AI-worker contract. Document intelligence remains unimplemented until its later phases.
+
 ## Development status
 
-Planning baseline only. Implementation should begin at **Phase 0** in `docs/04_PHASE_PLAN.md`.
+Phase 0 foundation complete. Document intelligence phases remain blocked until their own goals and exit criteria are implemented.

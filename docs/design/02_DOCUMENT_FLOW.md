@@ -1,8 +1,10 @@
 # MamaGift Document Flow
 
-**Status:** Draft design handoff — requires user review before implementation authority.
+**Status:** Approved design handoff.
 
-**Scope:** Upload, archive, processing, document inspection, source verification, metadata review, and supported corrections. Chat is referenced only where the document flow hands off to the Phase 4 single-document assistant; its detailed interaction contract is in `03_CHAT_FLOW.md`.
+**Scope:** Upload, archive, processing, document inspection, source verification, metadata review, and supported corrections. Chat is referenced only where the document flow hands off to the feature-gated single-document assistant; its detailed interaction contract is in `03_CHAT_FLOW.md`.
+
+**Internal phase note:** Phase labels below are implementation-scope annotations only. They must never appear in product navigation, controls, empty states, or other user-facing copy.
 
 **Phase boundary:** The core user-facing document flow is Phase 3. Parser benchmark, ingestion, and canonical data work belong to Phases 1–2. Single-document Q&A is Phase 4. Archive-wide search/chat is Phase 5. This document defines visual states for later phases but does not authorize their implementation early.
 
@@ -54,14 +56,14 @@ Upload drawer
            |       |       |
            |       |       +--> Chi tiết / correction feedback
            |       +----------> source page/block focus
-           +------------------> Trợ lý (Phase 4, selected doc only)
+           +------------------> Assistant workspace (when enabled, selected doc only)
 ```
 
 ## 4. D-01 — Open the archive
 
 ### Entry and intent
 
-**Entry:** User selects `Văn bản` or `Gần đây`, or returns from a document workspace.
+**Entry:** User selects `Văn bản`, applies the recent grouping/filter inside the archive, or returns from a document workspace.
 
 **Intent:** Find an existing document or start a new upload.
 
@@ -71,9 +73,8 @@ Upload drawer
 +----------------------+-----------------------------------------------+
 | MamaGift             | Văn bản                         [Tải văn bản] |
 |                      |-----------------------------------------------|
-|  Trợ lý              | [Tìm theo tên, số văn bản...] [Lọc]            |
-|  Văn bản  *          |                                               |
-|  Gần đây             | HÔM NAY                                       |
+|  Văn bản  *          | [Tìm theo tên, số văn bản...] [Lọc]            |
+|    Gần đây (bộ lọc)  | HÔM NAY                                       |
 |                      | +-------------------------------------------+ |
 |                      | | Công văn 142/SGDĐT-GDTH                   | |
 |                      | | Về việc ...                                | |
@@ -112,7 +113,7 @@ Upload drawer
 
 ### Entry and intent
 
-**Entry:** `Tải văn bản PDF` from the archive, or the attachment button from the Phase 4 assistant when no/another document is selected.
+**Entry:** `Tải văn bản PDF` from the archive, or `Chọn văn bản` from an enabled assistant workspace when the user needs a different document context.
 
 **Intent:** Submit one Vietnamese administrative PDF and receive a durable document/job state.
 
@@ -179,7 +180,7 @@ Upload drawer
       |
       +--> Cần kiểm tra ---> Mở để kiểm tra
       |
-      +--> Sẵn sàng -------> Mở văn bản / Hỏi trợ lý (Phase 4)
+      +--> Sẵn sàng -------> Mở văn bản
       |
       +--> Không đọc được -> Thử lại / Tải tệp khác
 ```
@@ -192,7 +193,7 @@ Upload drawer
 | Actions | Wait/reload status, open workspace when available, retry/reprocess only when API capability supports it, choose another file for unsupported input. |
 | Loading | Poll or refresh according to the implementation contract; show a calm progress label, not technical worker logs. Keep original file/download/view access only if available from the API state. |
 | Empty | A status page is never empty: it always has the document identity and current state. If canonical content has zero blocks, show the original plus an explicit no-structured-content message. |
-| Success | `Sẵn sàng` opens D-04. `Cần kiểm tra` opens D-04 with the metadata review emphasis. The UI does not imply Q&A readiness unless Phase 4 Q&A is available. |
+| Success | `Sẵn sàng` opens D-04. `Cần kiểm tra` opens D-04 with the metadata review emphasis. The UI does not imply assistant Q&A readiness unless that capability is enabled. |
 | Retryable error/offline | A home worker being offline is not a terminal document failure. Show `Đang chờ máy xử lý` or equivalent separate availability note and keep the job retryable. |
 | Terminal error | `Không đọc được văn bản` or `Định dạng chưa được hỗ trợ`, with the documented next action. Preserve original file and error context. |
 | Back/navigation | Back preserves list context. Reopening the status returns to the same state; do not reset to upload. |
@@ -207,8 +208,8 @@ Upload drawer
 | `QUEUED_FOR_PARSE` | `Đang chờ xử lý` | Wait; if worker unavailable, show separate retryable note |
 | `PARSING`, `NORMALIZING`, `STRUCTURING` | `Đang đọc văn bản` | Wait |
 | `READY_FOR_REVIEW` | `Cần kiểm tra` | Open document and review fields |
-| `INDEXING` | `Đang chuẩn bị tìm kiếm` | Wait; Phase 5 archive retrieval is not implied |
-| `READY` | `Sẵn sàng` | Open document; Phase 4 Q&A only when separately available |
+| `INDEXING` | `Đang chuẩn bị tìm kiếm` | Wait; archive-wide retrieval is not implied |
+| `READY` | `Sẵn sàng` | Open document; assistant access is separately feature-gated |
 | `PARSE_FAILED` | `Không đọc được văn bản` | Retry/reprocess if supported; otherwise upload another file |
 | `UNSUPPORTED` | `Định dạng chưa được hỗ trợ` | Choose a supported PDF |
 
@@ -226,33 +227,54 @@ Upload drawer
 
 **Intent:** Compare the original PDF with the structured representation and verify critical fields.
 
-### Desktop wireframe
+### Desktop verification workspace
+
+The default verification workspace is the Phase 3 source-first layout:
 
 ```text
 +----------------+--------------------------------+----------------------+
-| VĂN BẢN        | CÔNG VĂN 142/SGDĐT-GDTH        | TRỢ LÝ (Phase 4)    |
+| VĂN BẢN        | CÔNG VĂN 142/SGDĐT-GDTH        | CHI TIẾT             |
 |                |                                |                      |
-| Search         | [<] page 3 / 8   [zoom]       | Tóm tắt              |
+| Search         | [<] page 3 / 8   [zoom]       | Hạn: 25/08/2026      |
+| [recent group]  |                                | Cần kiểm tra         |
+| > Công văn...  |      ORIGINAL PDF             | [Đi tới nguồn]       |
+|   Kế hoạch...  |   +----------------------+     | [Sửa]                |
+|                |   | page image/text      |     |                      |
+|                |   | [source highlight]   |     | Parsed content       |
+|                |   +----------------------+     | Điều 5 → Khoản 2…   |
 |                |                                |                      |
-| Hôm nay        |      ORIGINAL PDF             | Deadline             |
-| > Công văn...  |   +----------------------+     | Tôi cần làm gì?       |
-|   Kế hoạch...  |   | page image/text      |     |                      |
-|                |   | [source highlight]   |     | Nguồn: Trang 3       |
-|                |   +----------------------+     | [Đi tới nguồn]        |
-|                |                                | +------------------+ |
-|                | STRUCTURED REPRESENTATION      | | Hỏi về văn bản…  | |
-|                | Điều 5 → Khoản 2 → ...         | | [đính kèm] [gửi] | |
+|                |                                |                      |
 +----------------+--------------------------------+----------------------+
 ```
 
-The right assistant pane is a Phase 4 addition. In Phase 3, use the space for structured content/metadata or leave the assistant action visibly unavailable with `Trợ lý sẽ có ở giai đoạn 4`.
+Implementation contract: `Document rail | Original PDF | Parsed content / metadata / correction`. The third column may be split between parsed content and metadata, but it remains the verification surface. No assistant nav/tab/control is rendered before the assistant capability is enabled.
+
+### Desktop assistant workspace (feature-enabled)
+
+When the assistant capability is enabled for the selected document, the workspace changes deliberately rather than mixing both products into one dense panel:
+
+```text
++----------------+--------------------------------+----------------------+
+| VĂN BẢN        | CÔNG VĂN 142/SGDĐT-GDTH        | TRỢ LÝ               |
+|                |                                |                      |
+| Search         | [<] page 3 / 8   [zoom]       | Tóm tắt              |
+| [recent group]  |      ORIGINAL PDF             | Nguồn: Trang 3       |
+| > Công văn...  |   +----------------------+     | [Đi tới nguồn]       |
+|   Kế hoạch...  |   | page image/text      |     |                      |
+|                |   | [source highlight]   |     | Hỏi về văn bản…     |
+|                |   +----------------------+     | [Chọn văn bản] [gửi] |
+|                |                                |                      |
++----------------+--------------------------------+----------------------+
+```
+
+Implementation contract: `Document rail | Original PDF | Assistant`. Parsed content and details become a secondary tab or drawer while the assistant is active. `Trợ lý` is a real product label only after the feature gate is on; it is never shown as a disabled placeholder.
 
 ### Actions and states
 
 | State/behavior | Handoff requirement |
 |---|---|
 | Entry | Keep document title/number, back, status, and current source context visible. Default to the first useful page or the citation target, not an unexplained blank canvas. |
-| Actions | Page navigation, source/structured reading, open details, focus cited block, correct supported field, start selected-document Q&A in Phase 4. PDF zoom/controls may use the chosen viewer but must preserve source page context. |
+| Actions | Page navigation, source/parsed-content reading, open details, focus cited block, correct supported field, and open the assistant when enabled. PDF zoom/controls may use the chosen viewer but must preserve source page context. |
 | Loading | Source: `Đang mở bản gốc…`; structured: `Đang tải nội dung đã trích xuất…`; metadata: field skeletons. Keep shell and back controls usable. |
 | Empty | If source unavailable: `Không thể mở bản gốc`. If canonical blocks are empty: `Chưa có nội dung cấu trúc để hiển thị`; do not render invented headings/fields. |
 | Success | Source and structured representation are visibly comparable. Fields show confidence/review status. `Đi tới nguồn` focuses page and block/bbox when known. |
@@ -262,9 +284,12 @@ The right assistant pane is a Phase 4 addition. In Phase 3, use the space for st
 
 ### Layout variants
 
-- **Desktop:** document rail 220–260px; source pane dominant; assistant 360–440px when Phase 4 is active; no overlapping normal panels.
-- **Tablet:** two panes `Nguồn` + `Trợ lý`; document rail is a drawer; details/structured view opens as a sheet or tab.
-- **Mobile:** three explicit surfaces/tabs: `Văn bản`, `Trợ lý`, `Chi tiết`. Citation navigation switches to `Văn bản` and stores page/block focus; a visible back action returns to the answer.
+- **Desktop verification:** document rail 220–260px; source pane dominant; parsed content/metadata/correction in the third column; no overlapping normal panels.
+- **Desktop assistant:** document rail + source pane + assistant pane; parsed content/details move to a secondary tab or drawer.
+- **Tablet verification:** `Original PDF + parsed content/details`; document rail is a drawer.
+- **Tablet assistant:** `Original PDF + assistant`; parsed content/details are a drawer.
+- **Mobile verification:** `Văn bản` + `Chi tiết`; citation navigation switches to `Văn bản` and stores page/block focus.
+- **Mobile assistant:** add `Trợ lý` only when enabled and a document is selected; citation navigation still switches to `Văn bản` and exposes `Quay lại câu trả lời`.
 
 ## 8. D-05 — Review and correct critical fields
 
@@ -340,7 +365,7 @@ The right assistant pane is a Phase 4 addition. In Phase 3, use the space for st
 
 ## 10. Source verification contract
 
-Whenever the UI presents a field source or Phase 4 answer citation, the interaction is:
+Whenever the UI presents a field source or assistant answer citation, the interaction is:
 
 ```text
 User activates Trang 3 / Đi tới nguồn
@@ -403,6 +428,13 @@ Citation/source rules:
 - Phase 8: meeting assistant, explicitly parked.
 
 ## 12. Accessibility checklist
+
+- [x] Reviewed UX corrections are applied; this is an approved design handoff.
+- [ ] Before assistant enablement, no `Trợ lý` navigation, tab, or dead control is rendered.
+- [ ] Recent documents remain a grouping/filter inside `Văn bản`, not a top-level destination.
+- [ ] Verification workspace is `Document rail | Original PDF | Parsed content / metadata / correction`.
+- [ ] Assistant workspace is `Document rail | Original PDF | Assistant`, with parsed/details secondary when active.
+- [ ] Context changes use `Chọn văn bản` rather than ambiguous attachment wording.
 
 - [ ] File input has a visible label and keyboard path.
 - [ ] Upload/status/error text is announced semantically, not only by color.

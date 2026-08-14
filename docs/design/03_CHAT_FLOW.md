@@ -1,8 +1,12 @@
 # MamaGift Chat Flow
 
-**Status:** Draft design handoff — requires user review before implementation authority.
+**Status:** Approved design handoff.
 
-**Scope:** Claude-inspired single-document assistant interaction for Phase 4, attached to the document-first workspace. This document does not authorize archive-wide chat, external search, autonomous actions, or a general-purpose chatbot.
+**Scope:** Claude-inspired single-document assistant interaction attached to the document-first workspace. This document does not authorize archive-wide chat, external search, autonomous actions, or a general-purpose chatbot.
+
+**Visibility gate:** Before the assistant capability is enabled, do not render `Trợ lý` in navigation, mobile tabs, document controls, or as a disabled placeholder. The flow begins only from a selected document after the capability gate is true.
+
+**Internal phase note:** Phase labels below are implementation-scope annotations only. They must never appear in product navigation, controls, empty states, or other user-facing copy.
 
 ## 1. Chat contract
 
@@ -37,7 +41,7 @@ The response contains `answer`, `status`, `citations`, and retrieval/model metad
 
 | Capability | Phase | Chat behavior |
 |---|---:|---|
-| Composer shell and document context | 3/4 | Phase 3 may show the shell/placeholder; it must not pretend to answer. |
+| Document context handoff | 3/4 | The document workspace is the current entry point; assistant surfaces render only after the capability gate is enabled. |
 | Grounded Q&A over one selected document | 4 | Working interaction defined here. |
 | Quick actions: summary, tasks, deadlines, applicability | 4 | Each is a normal grounded question through the same path. |
 | Citation page/block jump | 4 | Required for every factual answer. |
@@ -49,7 +53,7 @@ The response contains `answer`, `status`, `citations`, and retrieval/model metad
 
 ## 2. Chat shell
 
-### 2.1 Empty assistant state
+### 2.1 Empty assistant state (feature-enabled)
 
 ```text
 +--------------------------------------------------+
@@ -64,7 +68,7 @@ The response contains `answer`, `status`, `citations`, and retrieval/model metad
 | +----------------------------------------------+ |
 | | Hỏi về văn bản…                              | |
 | |                                              | |
-| | [Đính kèm / đổi văn bản]              [Gửi ↑]| |
+| | [Chọn văn bản]                        [Gửi ↑]| |
 | +----------------------------------------------+ |
 +--------------------------------------------------+
 ```
@@ -82,14 +86,14 @@ Interaction/layout rules:
 
 ### Entry
 
-The user selects `Trợ lý` with a ready document selected, opens the assistant pane from D-04, or returns to a previous answer after viewing a citation.
+The enabled assistant is opened from a ready selected document, or the user returns to a previous answer after viewing a citation. It is not opened from a standalone top-level navigation item before enablement.
 
 ### Actions
 
 - Read the selected document context label.
 - Choose one of the four quick actions.
 - Type a question and send it.
-- Select `Đính kèm / đổi văn bản` to choose a known document or enter the upload flow; this is a context-selection action, not an invented binary field in the Q&A request.
+- Select `Chọn văn bản` to choose a known document or enter the upload flow; this is a context-selection action, not an invented binary field in the Q&A request.
 - Select a citation to open the source.
 
 ### State contract
@@ -98,7 +102,7 @@ The user selects `Trợ lý` with a ready document selected, opens the assistant
 |---|---|
 | Loading | On opening, show the document title and a restrained `Đang mở trợ lý…` placeholder. Do not fabricate a prior thread or answer. |
 | Empty | Show greeting, composer, and quick actions. If no document is selected, replace enabled quick actions with `Chọn một văn bản để hỏi có căn cứ` and link to `Văn bản`. |
-| Success | Selected document identity is visible above the thread; the question scope is obvious. The user can ask only about that document in Phase 4. |
+| Success | Selected document identity is visible above the thread; the question scope is obvious. The user can ask only about that document. |
 | Error/offline | If the document context cannot load, show retry plus `Mở Văn bản`. If the AI worker is unavailable, keep source browsing available and show the explicit unavailable state when a question is sent. |
 | Navigation/back | Return from source keeps the thread, answer, question, and selected document. Switching documents starts a clearly labelled new context and must not silently reuse old citations. |
 | Source/citation | No answer is shown without resolvable source citations when the answer contains document facts. |
@@ -107,7 +111,7 @@ The user selects `Trợ lý` with a ready document selected, opens the assistant
 
 - **Desktop:** assistant-only centered thread or right pane in D-04.
 - **Tablet:** assistant and source are two panes; archive/document rail opens as a drawer.
-- **Mobile:** assistant is the `Trợ lý` surface; `Văn bản` and `Chi tiết` are sibling surfaces with a one-tap switch.
+- **Mobile:** assistant is the `Trợ lý` surface only after enablement; `Văn bản` and `Chi tiết` remain sibling surfaces with a one-tap switch.
 
 ## 4. C-02 — Ask a question
 
@@ -123,14 +127,14 @@ The user selects `Trợ lý` with a ready document selected, opens the assistant
 +--------------------------------------------------+
 | Hỏi về văn bản…                                  |
 |                                                  |
-| [paperclip]                              [Gửi ↑] |
+| [Chọn văn bản]                            [Gửi ↑] |
 +--------------------------------------------------+
 ```
 
 - Enter submits only when it does not conflict with the documented multiline keyboard behavior; Shift+Enter creates a newline if that behavior is chosen.
 - The send button is disabled for blank/whitespace-only input.
 - Submit the selected opaque `document_id` through the path and the question in the documented body.
-- An attachment icon may open document selection/upload; it must not imply that the Q&A endpoint accepts arbitrary raw files.
+- `Chọn văn bản` may open document selection/upload; it must not imply that the Q&A endpoint accepts arbitrary raw files.
 
 ### State contract
 
@@ -139,7 +143,7 @@ The user selects `Trợ lý` with a ready document selected, opens the assistant
 | Loading | After submit, render the user question immediately and add an assistant `Đang tìm trong văn bản…` status. Disable duplicate send for the same request. Do not show token-by-token fake prose. |
 | Empty | Blank composer is an idle state, not a conversation response; show the placeholder and optional quick actions. |
 | Success | The answer is appended to the same selected-document thread with citation chips and lightweight follow-up actions. |
-| Error/offline | Keep the typed question recoverable when request fails. Show structured `Thử lại`/`Chọn văn bản khác` actions; never turn a network error into `Chưa tìm thấy thông tin`. |
+| Error/offline | Keep the typed question recoverable when request fails. Show structured `Thử lại`/`Chọn văn bản` actions; never turn a network error into `Chưa tìm thấy thông tin`. |
 | Navigation/back | Leaving the chat preserves the drafted text only if the implementation can do so reliably; otherwise warn before losing non-empty draft. Returning preserves the submitted thread. |
 | Source/citation | The question itself has no citation; its answer must render only citations returned and validated by the API. |
 
@@ -147,7 +151,7 @@ The user selects `Trợ lý` with a ready document selected, opens the assistant
 
 - **Desktop:** composer max width matches thread, floating/sticky near bottom with 14px radius and restrained elevation.
 - **Tablet:** composer spans assistant pane; source remains one switch away.
-- **Mobile:** composer is fixed above the virtual keyboard/safe area; send and attachment touch targets are at least approximately 44px.
+- **Mobile:** composer is fixed above the virtual keyboard/safe area; send and document-selection touch targets are at least approximately 44px.
 
 ## 5. C-03 — Quick grounded actions
 
@@ -264,7 +268,7 @@ The API returns `ai_worker_unavailable` or `failed`, or the browser cannot reach
 | State | Behavior |
 |---|---|
 | Entry | Keep the selected document, user question, and prior thread visible. |
-| Actions | `Thử lại`, `Mở văn bản`, and, where appropriate, `Đổi văn bản`. Do not offer a model selector or unsupported local fallback. |
+| Actions | `Thử lại`, `Mở văn bản`, and, where appropriate, `Chọn văn bản`. Do not offer a model selector or unsupported local fallback. |
 | Loading | On retry, show `Đang thử lại…` and lock duplicate requests. |
 | Empty | Not an empty conversation; prior answers/source remain visible. |
 | Success | On retry success, append one answer and avoid duplicate user messages if the first request was accepted. |
@@ -282,14 +286,14 @@ The API returns `ai_worker_unavailable` or `failed`, or the browser cannot reach
 
 ### Entry and intent
 
-User chooses `Đính kèm / đổi văn bản`, a different row from the archive, or the document context selector in the assistant header.
+User chooses `Chọn văn bản`, a different row from the `Văn bản` archive, or the document context selector in the assistant header.
 
 ### Contract
 
 | State | Behavior |
 |---|---|
 | Entry | Show current document identity and explain that a new context changes what can be cited. |
-| Actions | Pick a known document from the archive/recent list or start D-02 upload. Cancel leaves the current thread untouched. |
+| Actions | Pick a known document from the `Văn bản` archive/recent grouping or start D-02 upload. Cancel leaves the current thread untouched. |
 | Loading | `Đang mở văn bản…`; do not clear the old thread until the new document is confirmed. |
 | Empty | If no other document exists, offer `Tải văn bản PDF`; do not show a fake picker. |
 | Success | New document title replaces the active context; prior thread is not presented as if it belongs to the new document. Start a new empty thread or an explicitly labelled new context. |
@@ -335,8 +339,13 @@ User chooses `Đính kèm / đổi văn bản`, a different row from the archive
 
 ## 12. Accessibility checklist
 
+- [x] Reviewed UX corrections are applied; this is an approved design handoff.
+- [ ] Before assistant enablement, `Trợ lý` is absent from navigation, tabs, and controls.
+- [ ] Document-context changes use `Chọn văn bản`.
+- [ ] The selected-document scope remains explicit after every context change.
+
 - [ ] Composer has a visible label and accessible name.
-- [ ] Send, attach/change document, retry, citation, source back, and quick actions are keyboard accessible.
+- [ ] Send, `Chọn văn bản`, retry, citation, source back, and quick actions are keyboard accessible.
 - [ ] Loading/errors/insufficient evidence are announced as status text and are not color-only.
 - [ ] Citation controls identify their destination, including page number where available.
 - [ ] Focus returns to the originating answer after a source jump.

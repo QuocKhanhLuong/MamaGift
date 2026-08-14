@@ -1,8 +1,10 @@
 # MamaGift Information Architecture
 
-**Status:** Draft design handoff — requires user review before implementation authority.
+**Status:** Approved design handoff.
 
-**Scope:** Product navigation, screen ownership, document-first context, and the relationship between the Phase 3 document workspace and the Phase 4 single-document assistant.
+**Scope:** Product navigation, screen ownership, document-first context, and the relationship between the verification workspace and the feature-gated single-document assistant.
+
+**Internal phase note:** Phase labels below are implementation-scope annotations only. They must never appear in product navigation, controls, empty states, or other user-facing copy.
 
 This document refines `docs/10_DESIGN_SYSTEM.md` without changing its global visual contract. It is based on `README.md`, `docs/00_PROJECT_CHARTER.md`, `docs/01_ARCHITECTURE.md`, `docs/04_PHASE_PLAN.md`, `docs/08_API_AND_DATA_CONTRACTS.md`, `docs/09_CODEX_EXECUTION.md`, and `docs/design/README.md`.
 
@@ -26,7 +28,7 @@ Ask a grounded question about the selected document
 Jump from every factual answer back to page/block evidence
 ```
 
-The document remains the primary context. Chat is a secondary inspection tool attached to a selected document in Phase 4. Archive-wide chat and cross-document retrieval are Phase 5, not a hidden capability of the initial shell.
+The document remains the primary context. Chat is a secondary inspection tool attached to a selected document when the assistant capability is enabled. Archive-wide chat and cross-document retrieval remain later-scope capabilities, not hidden behavior of the initial shell.
 
 ## 2. Phase map
 
@@ -53,10 +55,10 @@ The desktop shell uses a restrained Claude-inspired conversation layout and Gran
 +----------------------+----------------------------------------------------------+
 | MamaGift             |                                                  [User]  |
 |                      |                                                          |
-|  + Trợ lý            |                  ACTIVE WORKSPACE                       |
+|  Văn bản             |                  ACTIVE WORKSPACE                       |
 |                      |                                                          |
-|  Văn bản             |  page title / context                                    |
-|  Gần đây             |                                                          |
+|                      |  page title / context                                    |
+|    Gần đây (bộ lọc)  |                                                          |
 |                      |  content                                                |
 |                      |                                                          |
 |  [optional collapse] |                                                          |
@@ -70,16 +72,16 @@ Desktop shell rules:
 - Do not add Analytics, Admin, Activity, Integrations, Billing, Teams, or model/provider navigation.
 - Keep the main workspace centered and readable; the shell should not feel like a KPI dashboard.
 - A document context label may appear in the top bar when the active workspace is a document.
+- The indented `Gần đây (bộ lọc)` row is a grouping/filter inside `Văn bản`, never a sibling route or top-level destination.
 
 ### 3.2 Primary destinations
 
 | Destination | User intent | Initial/empty behavior | Current phase |
 |---|---|---|---:|
-| **Trợ lý** | Start a question or resume the selected document context | Greeting plus composer; if no document is selected, explain that grounded questions need a document | Visual shell in 3; working single-document Q&A in 4 |
-| **Văn bản** | Find, upload, and inspect documents | Explain what a document library is and show the upload action | 3 |
-| **Gần đây** | Reopen recently updated documents | Use only API-supported ordering over known document resources; no invented conversation-history endpoint | 3 |
+| **Văn bản** | Find, upload, inspect, and group documents | Explain what a document library is and show the upload action | Primary destination |
+| **Trợ lý** | Ask about the selected document when the assistant capability is enabled | No navigation item, tab, or dead control is rendered before enablement | Conditional contextual surface |
 
-`Gần đây` is a view over known document resources, not a promise of persisted chat history. If the list contract does not provide ordering, do not invent a separate recent-items endpoint; keep the view unavailable or visibly limited until it does.
+Recent documents are a grouping/filter inside `Văn bản`, not a top-level destination. Use only API-supported ordering over known document resources; do not invent a recent-items or conversation-history endpoint.
 
 ### 3.3 Conceptual screen tree
 
@@ -87,28 +89,24 @@ Route names below are screen identifiers for handoff, not a commitment to unveri
 
 ```text
 MamaGift shell
-├── Trợ lý [Phase 3 shell / Phase 4 working]
-│   ├── No document selected
-│   │   ├── Greeting + composer
-│   │   ├── Suggested actions (disabled or explanatory until a document exists)
-│   │   └── Attachment entry to upload flow
-│   └── Document selected
-│       ├── Current single-document thread
-│       ├── Quick grounded questions
-│       ├── Answer + citation chips
-│       └── Source jump -> Document workspace
-├── Văn bản [Phase 3]
-│   ├── Archive list/search/filter
-│   ├── Upload panel
-│   ├── Processing status
-│   └── Document workspace
-│       ├── Original PDF/source pane
-│       ├── Structured representation
-│       ├── Metadata + confidence review
-│       └── Correction feedback
-└── Gần đây [Phase 3]
-    └── Recent document list -> same Document workspace
+└── Văn bản
+    ├── Archive list/search/filter
+    ├── Recent grouping/filter inside the archive
+    ├── Upload panel
+    ├── Processing status
+    └── Document workspace
+        ├── Verification workspace [default]
+        │   ├── Document rail
+        │   ├── Original PDF
+        │   └── Parsed content / metadata / correction
+        └── Assistant workspace [only when capability is enabled]
+            ├── Document rail
+            ├── Original PDF
+            └── Assistant
+                └── Parsed content/details in secondary tab or drawer
 ```
+
+The assistant workspace is entered from a selected document only. It is not a top-level destination before the capability is enabled.
 
 ### 3.4 Later-phase surfaces kept out of the current tree
 
@@ -119,7 +117,7 @@ The following may be named in planning material but must not appear as active na
 - **Meeting:** Phase 8; no audio/transcript UI now.
 - **Training/admin/benchmark dashboards:** operational or later-phase surfaces, not family-user navigation.
 
-If product wants to preview a later capability, use a non-interactive label such as `Sắp có ở giai đoạn 5 — hỏi trên toàn bộ kho văn bản`, never a live control that returns fabricated results.
+If product wants to preview a later capability, use a non-interactive, internally approved placeholder with no active action, never a live control that returns fabricated results.
 
 ## 4. Context ownership and back behavior
 
@@ -128,7 +126,7 @@ If product wants to preview a later capability, use a non-interactive label such
 The UI should preserve context as a stack rather than opening unrelated pages:
 
 ```text
-Archive / Recent list
+Văn bản archive / recent grouping
         |
         v
 Selected document workspace
@@ -144,7 +142,7 @@ Back behavior:
 
 1. **Citation source focus:** return to the exact answer and scroll position in the assistant; keep the cited page/block selected in the source pane when the layout permits.
 2. **Assistant -> document workspace:** return to the previous source page, panel state, and selected document.
-3. **Document workspace -> archive/recent:** preserve the list query/filter and approximate scroll position.
+3. **Document workspace -> archive:** preserve the list query/filter and approximate scroll position, including an active recent grouping/filter.
 4. **Upload drawer -> archive:** cancel closes the drawer without inventing a document; successful upload opens the newly created document status context.
 5. **Mobile tab change:** back returns to the previously active surface, not to a reset document. A browser/system back from the document subview returns to the list.
 
@@ -168,7 +166,7 @@ The following contracts apply to every major IA flow. Each state is explicit so 
 |---|---|
 | Loading | Show `Đang đăng nhập…`; prevent duplicate submit and keep the entered values according to the chosen auth implementation. |
 | Empty | Initial form with Vietnamese labels and one obvious `Đăng nhập` action. No fabricated account list or onboarding claims. |
-| Success | Enter the MamaGift shell at `Trợ lý` or `Văn bản` according to the approved product default; retain no sensitive value in visible UI. |
+| Success | Enter the MamaGift shell at `Văn bản`; retain no sensitive value in visible UI. The assistant is not opened until its capability is enabled and a document is selected. |
 | Error/offline | Show `Không thể đăng nhập` with a retry action and a plain explanation when available. Do not turn network failure into invalid credentials without server evidence. |
 | Navigation/back | Desktop/browser back follows the auth implementation; mobile back does not expose protected document content. After success, shell navigation owns back behavior. |
 | Source/citation | No document source/citation exists before a document is opened. |
@@ -179,14 +177,15 @@ The following contracts apply to every major IA flow. Each state is explicit so 
 - Tablet: same form with comfortable width and safe margins; shell rail is not shown before authentication.
 - Mobile: full-width labelled controls with 44px-ish actions; keep the form above the keyboard and safe area.
 
-### IA-01 — Open the assistant
+### IA-01 — Open the feature-gated assistant workspace
 
-**Entry:** User selects **Trợ lý** from the shell, or returns from a source citation.
+**Entry:** An enabled assistant capability is invoked from a selected document workspace, or the user returns from a source citation. Before enablement, no `Trợ lý` navigation item, tab, or dead control is rendered.
 
 **Actions:**
 
 - If a document is selected, type a question or choose one of the four current quick actions.
-- If no document is selected, attach/upload a PDF through the documented upload path or go to **Văn bản**.
+- If no document is selected, go to **Văn bản** to choose or upload a PDF; the assistant is never opened without document context.
+- Use `Chọn văn bản` to change document context; this opens the documented picker/upload flow and does not send a binary Q&A attachment.
 - Choose a citation to open its source.
 
 **States:**
@@ -195,20 +194,20 @@ The following contracts apply to every major IA flow. Each state is explicit so 
 |---|---|
 | Loading | On first document-context load, show a quiet `Đang mở văn bản…` placeholder in the thread/source context. Do not show fake assistant text. |
 | Empty | Greeting, one large composer, and a clear explanation: `Để trả lời có căn cứ, hãy chọn hoặc tải lên một văn bản.` |
-| Success | Selected document name/metadata is visible near the thread; quick actions are enabled only when Phase 4 Q&A is available. |
+| Success | Selected document name/metadata is visible near the thread; quick actions appear only when the assistant capability is enabled. |
 | Error/offline | If the selected document cannot load, show a retry action and a link back to **Văn bản**. If AI is unavailable, retain the document and explain that browsing still works. |
 | Navigation/back | Return from source preserves the answer and selected evidence. Go to **Văn bản** preserves the current document selection. |
 | Source/citation | No factual assistant response without a citation object that resolves to document/page/block. |
 
 **Layouts:**
 
-- Desktop: centered thread at 760–860px; when a document is active, use the document workspace with source dominant and assistant at right.
-- Tablet: source and assistant are the two active panes; archive rail is a drawer.
-- Mobile: one active surface (`Văn bản`, `Trợ lý`, or `Chi tiết`); switch in one tap and preserve the selected document/page.
+- Desktop: use the assistant workspace with source dominant and assistant at right only when the capability is enabled; otherwise remain in the verification workspace.
+- Tablet: the enabled assistant workspace uses source + assistant; before enablement use source + parsed content/details.
+- Mobile: use `Văn bản` and `Chi tiết` in the verification workspace; add `Trợ lý` only when enabled and a selected document is active. Preserve document/page context.
 
 ### IA-02 — Browse the archive
 
-**Entry:** User selects **Văn bản** or **Gần đây**.
+**Entry:** User selects **Văn bản** or a recent grouping/filter within the `Văn bản` archive.
 
 **Actions:** Search/filter using only current document-list capabilities; select a row; choose upload; retry a retryable processing item.
 
@@ -226,14 +225,14 @@ The following contracts apply to every major IA flow. Each state is explicit so 
 **Layouts:**
 
 - Desktop: left rail plus comfortable library rows; avoid a dense table.
-- Tablet: library occupies the active surface; source/assistant opens as the next surface or sheet.
+- Tablet: library occupies the active surface; the verification workspace opens as the next surface or sheet. The assistant opens only when enabled.
 - Mobile: full-width rows, 44px-ish touch target, filters in a sheet, one primary upload action.
 
 ### IA-03 — Work inside a selected document
 
-**Entry:** User selects a document from the archive/recent view, opens a successful upload, or follows a citation.
+**Entry:** User selects a document from the archive/recent grouping, opens a successful upload, or follows a citation.
 
-**Actions:** Read original PDF, inspect structured representation, open metadata/details, move to a cited page/block, ask a Phase 4 question, or correct a supported field.
+**Actions:** Read original PDF, inspect parsed content, open metadata/details, move to a cited page/block, correct a supported field, or open the assistant when enabled.
 
 **States:**
 
@@ -248,9 +247,11 @@ The following contracts apply to every major IA flow. Each state is explicit so 
 
 **Layouts:**
 
-- Desktop: document rail 220–260px, source pane dominant, assistant 360–440px when Phase 4 is active.
-- Tablet: two panes (`Nguồn` + `Trợ lý`) with metadata in a drawer; structured text can appear as a source subview.
-- Mobile: tabs `Văn bản` / `Trợ lý` / `Chi tiết`; the selected page and citation focus survive tab changes.
+- Desktop verification workspace: `Document rail | Original PDF | Parsed content / metadata / correction`.
+- Desktop assistant workspace: `Document rail | Original PDF | Assistant`; parsed content/details move to a secondary tab or drawer while the assistant is active.
+- Tablet verification workspace: `Original PDF + parsed content/details`; the document rail is a drawer.
+- Tablet assistant workspace: `Original PDF + assistant`; parsed content/details are a drawer.
+- Mobile verification workspace: `Văn bản` + `Chi tiết`; mobile adds `Trợ lý` only when the assistant capability is enabled. The selected page and citation focus survive every switch.
 
 ### IA-04 — Review metadata and correct a field
 
@@ -286,8 +287,8 @@ The product uses plain Vietnamese labels mapped from the API contracts:
 | `QUEUED_FOR_PARSE` | `Đang chờ xử lý` | Waiting for parser work; not a parse failure. |
 | `PARSING` / `NORMALIZING` / `STRUCTURING` | `Đang đọc văn bản` | Processing is active; avoid technical provider names. |
 | `READY_FOR_REVIEW` | `Cần kiểm tra` | Reviewable output exists; low-confidence fields may need attention. |
-| `INDEXING` | `Đang chuẩn bị tìm kiếm` | Later/indexing step; in Phase 4 this may be visible only if contract exposes it. |
-| `READY` | `Sẵn sàng` | Document can be browsed; Phase 4 Q&A depends on its separate capability. |
+| `INDEXING` | `Đang chuẩn bị tìm kiếm` | Indexing state; render only when the contract exposes it. |
+| `READY` | `Sẵn sàng` | Document can be browsed; assistant access remains separately feature-gated. |
 | `PARSE_FAILED` | `Không đọc được văn bản` | Terminal parse problem with retry/reprocess only when supported. |
 | `UNSUPPORTED` | `Định dạng chưa được hỗ trợ` | User must choose another file or a later-supported path. |
 | `ai_worker_unavailable` | `Trợ lý AI tạm thời không kết nối` | Q&A unavailable; document browsing remains usable. |
@@ -303,14 +304,14 @@ Use the product-specific components named in `docs/10_DESIGN_SYSTEM.md` only whe
 | Document workspace | `DocumentViewer`, `DocumentMetadata`, `SourceHighlight` |
 | Provenance | `CitationChip`, `CitationPreview`, `SourceHighlight` |
 | Review | `ConfidenceField`, `CorrectionControl`, `DeadlineCard`, `ActionItem` |
-| Chat (Phase 4) | `AssistantThread`, `AssistantComposer`, `QuickQuestionActions`, `DocumentAttachment`, `HomeAINodeStatus` |
+| Conditional assistant | `AssistantThread`, `AssistantComposer`, `QuickQuestionActions`, `DocumentAttachment` (context selector only; label `Chọn văn bản`), `HomeAINodeStatus` |
 
 No component implies an endpoint. The implementation must map each visible action to an API contract or render it as an explicit unavailable/future state.
 
 ## 8. Accessibility and content rules
 
 - Use semantic headings so a screen-reader user can distinguish archive, source, details, and assistant regions.
-- Name every icon-only action, including citation jump, panel close, retry, attachment, send, and back.
+- Name every icon-only action, including citation jump, panel close, retry, document selection, send, and back.
 - Do not communicate status through color alone; pair color with text and an icon/semantic state.
 - Keep important touch targets around 44px on mobile.
 - Never hide source/citation information behind more than one interaction layer.
@@ -321,9 +322,13 @@ No component implies an endpoint. The implementation must map each visible actio
 
 Before implementation begins, confirm:
 
-- [ ] User has reviewed and approved this draft.
-- [ ] Phase 3 screens do not expose working Q&A controls before Phase 4.
-- [ ] Phase 4 Q&A remains selected-document-only.
+- [x] User-reviewed corrections are applied; this is an approved design handoff.
+- [ ] Before assistant enablement, `Trợ lý` is absent from navigation, tabs, and controls.
+- [ ] Recent documents appear only as a grouping/filter inside `Văn bản`.
+- [ ] Verification workspace is `Document rail | Original PDF | Parsed content / metadata / correction`.
+- [ ] Assistant workspace is `Document rail | Original PDF | Assistant`, with parsed/details secondary when active.
+- [ ] Assistant access remains selected-document-only when enabled.
+- [ ] Context-changing actions use `Chọn văn bản`.
 - [ ] Every answer citation resolves to known document/page/block data.
 - [ ] Archive filters map only to available list/filter capabilities.
 - [ ] No global chat history, archive-wide RAG, meeting, or admin surface is silently introduced.
