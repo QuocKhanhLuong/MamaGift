@@ -16,7 +16,8 @@ Before changing code, read:
 8. `docs/06_CICD.md`
 9. `docs/07_DATA_AND_CONTINUAL_LEARNING.md`
 10. `docs/08_API_AND_DATA_CONTRACTS.md`
-11. `docs/PHASE_STATUS.md`
+11. `docs/10_DESIGN_SYSTEM.md`
+12. `docs/PHASE_STATUS.md`
 
 Then inspect the repository state. Repository code is authoritative when it conflicts with assumptions, but architectural changes require updating docs/ADR rather than silently diverging.
 
@@ -137,7 +138,7 @@ For each migration:
 - update API/data docs if contract changes;
 - avoid destructive production assumptions without a migration/backup plan.
 
-## 11. Frontend rule
+## 11. Frontend and design rule
 
 The target user is non-technical.
 
@@ -150,7 +151,18 @@ UI priorities:
 5. mobile-friendly layout;
 6. no prompt-engineering dependence for common tasks.
 
-Do not optimize for flashy AI UI at the expense of provenance.
+`docs/10_DESIGN_SYSTEM.md` is the binding UI design contract.
+
+The intended direction is:
+
+- Claude-inspired **interaction/layout** for chat;
+- Granola-inspired **warm/editorial visual language**;
+- document-first, provenance-first MamaGift behavior;
+- shadcn/ui + assistant-ui as preferred UI primitives unless repository evidence justifies another choice.
+
+Do not pixel-copy proprietary branding/assets. Do not optimize for flashy AI UI at the expense of provenance.
+
+Before substantial Phase 3 or Phase 4 frontend implementation, if approved design diagrams exist under `docs/design/`, read them as well. Approved flow diagrams may refine implementation details but must not silently contradict `docs/10_DESIGN_SYSTEM.md`; update the design contract when a user-approved decision changes it.
 
 ## 12. CI rule
 
@@ -208,7 +220,7 @@ Read README.md and every file under docs/ listed in docs/09_CODEX_EXECUTION.md b
 
 Implement ONLY Phase <N> from docs/04_PHASE_PLAN.md. Treat its exact /goal, deliverables, non-goals, required tests, CI gate, and exit criteria as binding requirements.
 
-Preserve the architecture and contracts in docs/01_ARCHITECTURE.md and docs/08_API_AND_DATA_CONTRACTS.md. Follow docs/05_TEST_STRATEGY.md and docs/06_CICD.md. Do not implement later phases.
+Preserve the architecture and contracts in docs/01_ARCHITECTURE.md and docs/08_API_AND_DATA_CONTRACTS.md. Follow docs/05_TEST_STRATEGY.md, docs/06_CICD.md, and docs/10_DESIGN_SYSTEM.md for all user-facing work. Do not implement later phases.
 
 Make all code/config/docs changes needed to complete the phase. Add and run the required tests and CI-equivalent checks. If a documented choice is intentionally unresolved, choose the simplest valid option and record a concise ADR when the choice materially affects architecture.
 
