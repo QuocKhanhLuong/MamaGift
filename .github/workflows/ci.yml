@@ -32,6 +32,7 @@ jobs:
             docs/07_DATA_AND_CONTINUAL_LEARNING.md
             docs/08_API_AND_DATA_CONTRACTS.md
             docs/09_CODEX_EXECUTION.md
+            docs/10_DESIGN_SYSTEM.md
             docs/PHASE_STATUS.md
           )
 
