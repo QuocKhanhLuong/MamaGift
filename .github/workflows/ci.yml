@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  repository-hygiene:
+    name: repository-hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate planning baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            README.md
+            docs/00_PROJECT_CHARTER.md
+            docs/01_ARCHITECTURE.md
+            docs/02_INFRASTRUCTURE.md
+            docs/03_DOCUMENT_PIPELINE.md
+            docs/04_PHASE_PLAN.md
+            docs/05_TEST_STRATEGY.md
+            docs/06_CICD.md
+            docs/07_DATA_AND_CONTINUAL_LEARNING.md
+            docs/08_API_AND_DATA_CONTRACTS.md
+            docs/09_CODEX_EXECUTION.md
+            docs/PHASE_STATUS.md
+          )
+
+          for file in "${required[@]}"; do
+            test -f "$file" || { echo "Missing required planning file: $file"; exit 1; }
+          done
+
+      - name: Reject obvious committed secrets and private-data paths
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.[^e][^x][^a][^m][^p][^l][^e]$' >/dev/null 2>&1; then
+            echo "A real .env-like file appears to be committed. Commit only .env.example."
+            exit 1
+          fi
+
+          if git ls-files | grep -E '(^|/)(private|private_data|real_school_docs)(/|$)' >/dev/null 2>&1; then
+            echo "Private-data path detected in Git. Use external/private storage instead."
+            exit 1
+          fi
+
+      - name: Reject merge-conflict markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!*.lock'; then
+            echo "Merge conflict marker detected."
+            exit 1
+          fi
+
+      - name: Guard accidental large files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          limit = 20 * 1024 * 1024
+          bad = []
+          for path in tracked:
+              if not path or not os.path.isfile(path):
+                  continue
+              size = os.path.getsize(path)
+              if size > limit:
+                  bad.append((path, size))
+          if bad:
+              for path, size in bad:
+                  print(f"Tracked file exceeds 20 MiB guard: {path} ({size} bytes)")
+              sys.exit(1)
+          PY
+
+  phase-zero-placeholder:
+    name: phase-zero-placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain bootstrap state
+        run: |
+          echo "Application-specific backend/frontend/parser jobs are intentionally added during Phase 0 and later phases."
+          echo "See docs/06_CICD.md and docs/04_PHASE_PLAN.md."
