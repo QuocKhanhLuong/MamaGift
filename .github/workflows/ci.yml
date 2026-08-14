@@ -39,20 +39,46 @@ jobs:
             test -f "$file" || { echo "Missing required planning file: $file"; exit 1; }
           done
 
-      - name: Reject obvious committed secrets and private-data paths
+      - name: Repository safety guards
         shell: bash
         run: |
           set -euo pipefail
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
 
-          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.[^e][^x][^a][^m][^p][^l][^e]$' >/dev/null 2>&1; then
-            echo "A real .env-like file appears to be committed. Commit only .env.example."
-            exit 1
-          fi
+          tracked = [
+              p for p in subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+              if p
+          ]
 
-          if git ls-files | grep -E '(^|/)(private|private_data|real_school_docs)(/|$)' >/dev/null 2>&1; then
-            echo "Private-data path detected in Git. Use external/private storage instead."
-            exit 1
-          fi
+          errors = []
+          allowed_env_names = {".env.example"}
+          private_parts = {"private", "private_data", "real_school_docs"}
+          size_limit = 20 * 1024 * 1024
+
+          for path in tracked:
+              parts = set(path.split("/"))
+              basename = os.path.basename(path)
+
+              if basename.startswith(".env") and basename not in allowed_env_names:
+                  errors.append(f"real .env-like file committed: {path}")
+
+              if parts & private_parts:
+                  errors.append(f"private-data path committed: {path}")
+
+              if os.path.isfile(path):
+                  size = os.path.getsize(path)
+                  if size > size_limit:
+                      errors.append(f"tracked file exceeds 20 MiB guard: {path} ({size} bytes)")
+
+          if errors:
+              print("Repository safety guard failed:")
+              for error in errors:
+                  print(f"- {error}")
+              sys.exit(1)
+          PY
 
       - name: Reject merge-conflict markers
         shell: bash
@@ -62,30 +88,6 @@ jobs:
             echo "Merge conflict marker detected."
             exit 1
           fi
-
-      - name: Guard accidental large files
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os
-          import subprocess
-          import sys
-
-          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
-          limit = 20 * 1024 * 1024
-          bad = []
-          for path in tracked:
-              if not path or not os.path.isfile(path):
-                  continue
-              size = os.path.getsize(path)
-              if size > limit:
-                  bad.append((path, size))
-          if bad:
-              for path, size in bad:
-                  print(f"Tracked file exceeds 20 MiB guard: {path} ({size} bytes)")
-              sys.exit(1)
-          PY
 
   phase-zero-placeholder:
     name: phase-zero-placeholder
