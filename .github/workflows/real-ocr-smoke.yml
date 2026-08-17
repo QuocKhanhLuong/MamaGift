@@ -1,0 +1,120 @@
+name: real-ocr-smoke
+
+on:
+  push:
+    branches:
+      - eval/real-pdf-batch-01
+    paths:
+      - .github/workflows/real-ocr-smoke.yml
+      - docs/eval/trigger-real-ocr-smoke.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ppstructure:
+    name: ppstructure-real-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: packages/contracts/python:packages/docpipe/python
+      PADDLE_PDX_MODEL_SOURCE: BOS
+
+    steps:
+      - name: Checkout eval branch
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install MamaGift locked dependencies
+        run: uv sync --locked
+
+      - name: Install PP-StructureV3 CPU provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+          uv pip install 'paddleocr[doc-parser]==3.3.2'
+          uv run python - <<'PY'
+          from mamagift_docpipe.adapters import PPStructureAdapter
+          print(PPStructureAdapter().healthcheck().model_dump())
+          PY
+
+      - name: Download one official scanned PDF
+        run: |
+          mkdir -p /tmp/mamagift-ocr artifacts/real-ocr-smoke
+          curl -fL --retry 3 --retry-delay 2 \
+            -o /tmp/mamagift-ocr/19-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/19-bgddt.pdf
+
+      - name: Run PP-StructureV3 through MamaGift adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from mamagift_docpipe import (
+              ParseRequest,
+              inspect_pdf,
+              normalize_provider_result,
+              parse_admin_document,
+          )
+          from mamagift_docpipe.adapters import PPStructureAdapter
+
+          pdf = Path('/tmp/mamagift-ocr/19-2026-TT-BGDDT.pdf')
+          inspection = inspect_pdf(pdf, document_id='real_19_2026')
+          adapter = PPStructureAdapter(
+              {
+                  'device': 'cpu',
+                  'lang': 'vi',
+                  'extra': {
+                      'use_doc_orientation_classify': False,
+                      'use_doc_unwarping': False,
+                      'use_textline_orientation': False,
+                      'use_seal_recognition': False,
+                      'use_table_recognition': False,
+                      'use_formula_recognition': False,
+                      'use_chart_recognition': False,
+                  },
+              }
+          )
+          raw = adapter.parse(ParseRequest(document_id='real_19_2026', pdf_path=pdf))
+          canonical = normalize_provider_result(raw, inspection=inspection)
+          admin = parse_admin_document(canonical)
+
+          blocks = [b for p in admin.pages for b in p.blocks]
+          payload = {
+              'provider': adapter.metadata.model_dump(mode='json'),
+              'route': inspection.route.value,
+              'page_count': len(admin.pages),
+              'block_count': len(blocks),
+              'text_chars': sum(len(b.text) for b in blocks),
+              'nonempty_blocks': sum(bool(b.text.strip()) for b in blocks),
+              'hierarchy_count': len(admin.hierarchy),
+              'table_count': len(admin.tables),
+              'fields': [f.model_dump(mode='json') for f in admin.extracted_fields],
+              'quality': admin.quality_report.model_dump(mode='json'),
+              'sample_text': [b.text for b in blocks if b.text.strip()][:25],
+          }
+          out = Path('artifacts/real-ocr-smoke/ppstructure-19.json')
+          out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(out.read_text(encoding='utf-8'))
+          PY
+
+      - name: Upload OCR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-ocr-smoke-${{ github.run_id }}
+          path: artifacts/real-ocr-smoke/
+          retention-days: 14
