@@ -13,12 +13,28 @@ Exact `/goal`:
 > Let a non-technical family user upload, find, inspect, and verify parsed documents without using developer tools.
 
 Phase 3's web flows, component/integration/E2E tests and CI gates are implemented and
-green. The product is demonstrable entirely from the browser, but it inherits Phase
-1/2's open item: every document shown was parsed by the undecided PyMuPDF baseline, so
-the UI correctly displays every field/parse run as `degraded`/`Cần kiểm tra` rather
-than implying a trustworthy production parse. Login is a screen/state handoff only
+the local CI-equivalent gate is green on hardening commit `e7cc7a8`. The product is
+demonstrable entirely from the browser, but it inherits Phase 1/2's open item: every
+document shown was parsed by the undecided PyMuPDF baseline, so the UI correctly
+displays every field/parse run as `degraded`/`Cần kiểm tra` rather than implying a
+trustworthy production parse. Login is a screen/state handoff only
 (`docs/design/01_INFORMATION_ARCHITECTURE.md` IA-00) with no real authentication
 backend, as no such contract exists yet.
+
+### Verification evidence snapshot — 2026-08-17
+
+- Current publication: Phase 1 commit `4659fab647078b75015761857fd4baf317b5f64e`,
+  Phase 2 commit `fc71f8b0178fbde82ffa2eebbffa43b9057e3699`, Phase 3 baseline
+  `d8edafe9724a3cca3004c5ecb4708c9da6bd6928`, and Phase 3 hardening commit
+  `e7cc7a8` are present on `main` and pushed to `origin/main`.
+- Local CI-equivalent: `make check` **PASS** on `e7cc7a8` — 410 Python tests passed
+  with 1 provider-contract skip, parser/ingestion/migration/feedback gates passed,
+  38 frontend tests passed, and the preserved desktop plus tablet/mobile Playwright
+  suite passed 3/3. Frontend lint retained one existing `react-refresh` warning.
+- GitHub CI: job definitions are present in `.github/workflows/ci.yml`, but live run
+  status was unavailable on this date because `gh run list --repo
+  QuocKhanhLuong/MamaGift --branch main` returned `error connecting to
+  api.github.com`; no run ID or remote PASS is claimed here.
 
 ### Phase 2 progress carried forward
 
@@ -54,9 +70,9 @@ production parser. Running the private benchmark is what closes both phases.
 | Phase | Name | Status | Exit evidence |
 |---|---|---|---|
 | 0 | Repository and deterministic development foundation | COMPLETE | `941a5c4`; CI run `31787161450` |
-| 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Harness, adapters, router, CanonicalDocument v1 and CI gates complete; ADR-001 `PENDING EVIDENCE` |
-| 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Ingestion pipeline, APIs, schema, admin parser and Phase 2 CI gates complete; production parser strategy still blocked on ADR-001 |
-| 3 | Document archive and verification-first web UX | IN_PROGRESS | Web shell, archive, upload/status, verification workspace, correction UI and Phase 3 CI gates complete; inherits Phase 1/2's undecided parser strategy |
+| 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Commit `4659fab`; harness, adapters, router, CanonicalDocument v1 and local CI gates complete; ADR-001 `PENDING EVIDENCE` |
+| 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Commit `fc71f8b`; ingestion pipeline, APIs, schema, admin parser and local Phase 2 gates complete; production parser strategy still blocked on ADR-001 |
+| 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
 | 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
@@ -117,13 +133,18 @@ Do not use this file for speculative progress or future plans; those belong in `
 
 ### Phase 1 progress — 2026-08-16
 
-- Commit/PR: pending (working tree).
-- Test commands: `make parser-contract-tests`; `make parser-benchmark-smoke`;
+- Commit/PR: `4659fab647078b75015761857fd4baf317b5f64e` is pushed to `main`; no
+  separate PR reference was observable from this checkout.
+- Test commands: the Phase 1 gate set is covered by the **PASS** `make check` in the
+  verification snapshot above. The individual commands remain
+  `make parser-contract-tests`; `make parser-benchmark-smoke`;
   `make backend-format-check`; `make backend-lint`; `make backend-typecheck`;
-  `make backend-test`; `make docs-check`; `make repository-hygiene`; `make secret-scan`.
-- CI status: `parser-contract-tests` and `parser-benchmark-smoke` jobs added to
+  `make backend-test`; `make docs-check`; `make repository-hygiene`; and
+  `make secret-scan`.
+- CI status: `parser-contract-tests` and `parser-benchmark-smoke` jobs are defined in
   `.github/workflows/ci.yml`; the manual heavy benchmark lives in
-  `.github/workflows/parser-benchmark.yml`.
+  `.github/workflows/parser-benchmark.yml`. Live GitHub status is unavailable; see
+  the verification snapshot and no run ID is claimed.
 - ADR/benchmark artifacts: `docs/decisions/ADR-001-parser-selection.md`
   (status `PENDING EVIDENCE`); eight synthetic fixtures with authored ground truth in
   `benchmarks/parser/`.
@@ -162,15 +183,20 @@ ADR-001 Decision section and set it to `ACCEPTED`.
 
 ### Phase 2 progress — 2026-08-17
 
-- Commit/PR: pending (working tree).
-- Test commands: `make ingestion-integration`; `make admin-parser-golden-tests`;
+- Commit/PR: `fc71f8b0178fbde82ffa2eebbffa43b9057e3699` is pushed to `main`; no
+  separate PR reference was observable from this checkout.
+- Test commands: the Phase 2 gate set is covered by the **PASS** `make check` in the
+  verification snapshot above. The individual commands remain
+  `make ingestion-integration`; `make admin-parser-golden-tests`;
   `make db-migration-test`; `make backend-format-check`; `make backend-lint`;
   `make backend-typecheck`; `make backend-test`; `make parser-contract-tests`;
   `make parser-benchmark-smoke`; `make docs-check`; `make repository-hygiene`;
-  `make secret-scan`; `make compose-config`.
+  `make secret-scan`; and `make compose-config`.
 - CI status: `ingestion-integration`, `admin-parser-golden-tests` and
-  `db-migration-test` jobs added to `.github/workflows/ci.yml`; the migration job runs
-  against the PostgreSQL service, the rest are CPU-only with no private data.
+  `db-migration-test` jobs are defined in `.github/workflows/ci.yml`; the migration
+  job runs against the PostgreSQL service, the rest are CPU-only with no private
+  data. Live GitHub status is unavailable; see the verification snapshot and no run
+  ID is claimed.
 - ADR/benchmark artifacts: `docs/decisions/ADR-002-ingestion-parser-strategy.md`
   (ACCEPTED); golden administrative fixtures in `tests/fixtures/admin/`.
 
@@ -213,13 +239,23 @@ ADR-001 Decision section and set it to `ACCEPTED`.
 
 ### Phase 3 progress — 2026-08-17
 
-- Commit/PR: pending (working tree).
-- Test commands: `make web-component-tests`; `make web-e2e-smoke`; `make feedback-tests`;
-  `make frontend-format-check`; `make frontend-lint`; `make frontend-typecheck`;
-  `make frontend-build`; `make db-migration-test`; full `make check`.
+- Commit/PR: baseline `d8edafe9724a3cca3004c5ecb4708c9da6bd6928` and hardening
+  `e7cc7a8` are pushed to `main`; no separate PR reference was observable from this
+  checkout.
+- Test commands: **PASS** — `make web-component-tests` (38 tests), `make feedback-tests`
+  (13 tests), `make web-e2e-smoke` (desktop 1/1 plus tablet/mobile 2/2),
+  `make frontend-format-check`, `make frontend-lint`, `make frontend-typecheck`,
+  `make frontend-build`, `make db-migration-test` (7 tests), and full `make check`.
+  The direct focused command `npm run test:run --prefix apps/web --
+  src/components/workspace/SourceViewer.test.tsx` also passed 7/7; an initial
+  root-context `npm --prefix apps/web exec vitest ...` invocation failed before
+  collection because it did not load the configured DOM environment.
 - CI status: `feedback-tests` and `web-e2e-smoke` jobs added to
   `.github/workflows/ci.yml`; `web-e2e-smoke` runs the real API, worker and a headless
   Chromium browser against a scratch SQLite database, no mocks and no private data.
+  The browser job now discovers the preserved desktop journey plus the tablet/mobile
+  smoke spec. Live GitHub status is unavailable; see the verification snapshot and
+  no run ID is claimed.
 - ADR/benchmark artifacts: none required — the frontend stack (React/TypeScript, Vite,
   Tailwind, Radix primitives styled to the shadcn/ui contract) was already decided by
   `docs/decisions/ADR-0001-phase0-stack.md` and `docs/10_DESIGN_SYSTEM.md`.
@@ -258,15 +294,21 @@ ADR-001 Decision section and set it to `ACCEPTED`.
 #### Required tests added
 
 - Component: `UploadDrawer`, `ProcessingStatus`, `ConfidenceField` (metadata +
-  low-confidence), `CorrectionControl`, `SourceViewer` (citation/source jump).
+  low-confidence), `CorrectionControl`, `SourceViewer` (citation/source jump plus
+  page/document preview recovery).
 - API integration (mocked via MSW): upload happy path, failed-processing UI, retry
   path, document search/filter, correction reflected without a full refetch.
 - Browser E2E (Playwright, real backend): `login -> upload -> processing -> open
   document -> verify metadata -> jump to cited page -> correct field -> reload ->
   correction persists`.
 - Backend: `services/api/tests/test_feedback_api.py` (persistence, latest-correction-
-  wins, unknown-document 404) and an extended
+  wins, unknown-document 404, required-field validation, current-canonical ID
+  validation and stale-ID rejection) and an extended
   `test_document_list_supports_metadata_search` in `test_ingestion_integration.py`.
+- Responsive browser smoke: `apps/web/e2e/responsive-workspace.spec.ts` covers
+  1024px tablet and 390px mobile archive/menu, source/page navigation, details
+  surfaces and return navigation; it asserts no interactive `Trợ lý` control while
+  preserving the approved login tagline.
 
 #### Blocking the phase exit
 
