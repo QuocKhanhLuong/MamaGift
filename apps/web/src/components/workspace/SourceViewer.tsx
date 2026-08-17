@@ -5,6 +5,51 @@ import { Button } from "../ui/Button";
 import { getPagePreviewUrl } from "../../api/documents";
 import type { CanonicalBlock, CanonicalPage } from "../../api/types";
 
+function PreviewImage({
+  documentId,
+  page,
+  focusedBlock,
+}: {
+  documentId: string;
+  page: CanonicalPage;
+  focusedBlock: CanonicalBlock | undefined;
+}) {
+  const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
+
+  if (imageState === "error") {
+    return (
+      <p role="alert" className="mt-8 text-mg-danger">
+        Không thể mở trang này.
+      </p>
+    );
+  }
+
+  return (
+    <div className="relative inline-block shadow-sm" style={{ width: "min(100%, 720px)" }}>
+      <img
+        key={`${documentId}-${page.page_number}`}
+        src={getPagePreviewUrl(documentId, page.page_number)}
+        alt={`Trang ${page.page_number} của bản gốc`}
+        className="block w-full"
+        onLoad={() => setImageState("ready")}
+        onError={() => setImageState("error")}
+      />
+      {focusedBlock?.bbox ? (
+        <span
+          aria-hidden="true"
+          className="absolute rounded-mg-sm border-2 border-mg-accent bg-mg-accent-soft/50"
+          style={{
+            left: `${(focusedBlock.bbox.x0 / page.width) * 100}%`,
+            top: `${(focusedBlock.bbox.y0 / page.height) * 100}%`,
+            width: `${((focusedBlock.bbox.x1 - focusedBlock.bbox.x0) / page.width) * 100}%`,
+            height: `${((focusedBlock.bbox.y1 - focusedBlock.bbox.y0) / page.height) * 100}%`,
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * D-04 source pane. The highlighted block is positioned as a percentage of the page's
  * point-space dimensions, so it stays correct regardless of the served PNG's actual
@@ -23,8 +68,6 @@ export function SourceViewer({
   onPageChange: (page: number) => void;
   focusedBlockId: string | null;
 }) {
-  const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
-
   if (!page) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-mg-text-muted">
@@ -64,34 +107,12 @@ export function SourceViewer({
       </div>
 
       <div className="flex flex-1 items-start justify-center overflow-auto bg-mg-surface-2 p-4">
-        {imageState === "error" ? (
-          <p role="alert" className="mt-8 text-mg-danger">
-            Không thể mở trang này.
-          </p>
-        ) : (
-          <div className="relative inline-block shadow-sm" style={{ width: "min(100%, 720px)" }}>
-            <img
-              key={`${documentId}-${page.page_number}`}
-              src={getPagePreviewUrl(documentId, page.page_number)}
-              alt={`Trang ${page.page_number} của bản gốc`}
-              className="block w-full"
-              onLoad={() => setImageState("ready")}
-              onError={() => setImageState("error")}
-            />
-            {focusedBlock?.bbox ? (
-              <span
-                aria-hidden="true"
-                className="absolute rounded-mg-sm border-2 border-mg-accent bg-mg-accent-soft/50"
-                style={{
-                  left: `${(focusedBlock.bbox.x0 / page.width) * 100}%`,
-                  top: `${(focusedBlock.bbox.y0 / page.height) * 100}%`,
-                  width: `${((focusedBlock.bbox.x1 - focusedBlock.bbox.x0) / page.width) * 100}%`,
-                  height: `${((focusedBlock.bbox.y1 - focusedBlock.bbox.y0) / page.height) * 100}%`,
-                }}
-              />
-            ) : null}
-          </div>
-        )}
+        <PreviewImage
+          key={`${documentId}-${page.page_number}`}
+          documentId={documentId}
+          page={page}
+          focusedBlock={focusedBlock}
+        />
       </div>
 
       {focusedBlock ? (

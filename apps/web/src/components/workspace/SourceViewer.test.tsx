@@ -1,11 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { SourceViewer } from "./SourceViewer";
+import { getPagePreviewUrl } from "../../api/documents";
 import { makeCanonicalDocument } from "../../test/fixtures";
 
 const canonical = makeCanonicalDocument();
+const page1 = canonical.pages[0];
 const page2 = canonical.pages[1];
 
 describe("SourceViewer (citation/source jump)", () => {
@@ -66,6 +68,72 @@ describe("SourceViewer (citation/source jump)", () => {
       />,
     );
     expect(container.querySelector('[aria-hidden="true"].border-mg-accent')).toBeNull();
+  });
+
+  it("recovers when a failed page changes to another page", () => {
+    const { rerender } = render(
+      <SourceViewer
+        documentId="doc_1"
+        page={page1}
+        pageCount={2}
+        onPageChange={vi.fn()}
+        focusedBlockId={null}
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "Trang 1 của bản gốc" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Không thể mở trang này.");
+
+    rerender(
+      <SourceViewer
+        documentId="doc_1"
+        page={page2}
+        pageCount={2}
+        onPageChange={vi.fn()}
+        focusedBlockId={null}
+      />,
+    );
+
+    const page2Image = screen.getByRole("img", { name: "Trang 2 của bản gốc" });
+    expect(page2Image).toHaveAttribute("src", getPagePreviewUrl("doc_1", page2.page_number));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.load(page2Image);
+    expect(screen.getByRole("img", { name: "Trang 2 của bản gốc" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("recovers when the document changes after a preview error", () => {
+    const { rerender } = render(
+      <SourceViewer
+        documentId="doc_1"
+        page={page1}
+        pageCount={2}
+        onPageChange={vi.fn()}
+        focusedBlockId={null}
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "Trang 1 của bản gốc" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Không thể mở trang này.");
+
+    rerender(
+      <SourceViewer
+        documentId="doc_2"
+        page={page1}
+        pageCount={2}
+        onPageChange={vi.fn()}
+        focusedBlockId={null}
+      />,
+    );
+
+    const newDocumentImage = screen.getByRole("img", { name: "Trang 1 của bản gốc" });
+    expect(newDocumentImage).toHaveAttribute("src", getPagePreviewUrl("doc_2", page1.page_number));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.load(newDocumentImage);
+    expect(screen.getByRole("img", { name: "Trang 1 của bản gốc" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("calls onPageChange when navigating and disables out-of-range controls", async () => {

@@ -34,7 +34,7 @@ def submit_feedback(
             details={"document_id": document_id},
         )
 
-    event = feedback_service.record_feedback(
+    event = feedback_service.submit_feedback(
         session,
         document,
         feedback_type=payload.feedback_type,

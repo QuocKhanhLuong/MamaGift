@@ -21,6 +21,8 @@ ENCRYPTED_PDF = "encrypted_pdf"
 STORAGE_FAILURE = "storage_failure"
 NOT_FOUND = "not_found"
 CONFLICT = "conflict"
+FEEDBACK_FIELD_REQUIRED = "feedback_field_required"
+FEEDBACK_FIELD_INVALID = "feedback_field_invalid"
 PARSER_STRATEGY_UNDECIDED = "parser_strategy_undecided"
 INTERNAL_ERROR = "internal_error"
 
