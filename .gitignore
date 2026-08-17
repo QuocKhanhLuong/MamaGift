@@ -30,3 +30,6 @@ benchmarks/parser/recordings/
 
 .agenteam/runs/
 .agenteam/reports/
+.agenteam/events/
+.agenteam/history/
+.agenteam/state/
