@@ -13,7 +13,7 @@ Exact `/goal`:
 > Let a non-technical family user upload, find, inspect, and verify parsed documents without using developer tools.
 
 Phase 3's web flows, component/integration/E2E tests and CI gates are implemented and
-the local CI-equivalent gate is green on hardening commit `e7cc7a8`. The product is
+the local CI-equivalent gate is green on final hardening commit `c75c489`. The product is
 demonstrable entirely from the browser, but it inherits Phase 1/2's open item: every
 document shown was parsed by the undecided PyMuPDF baseline, so the UI correctly
 displays every field/parse run as `degraded`/`Cần kiểm tra` rather than implying a
@@ -26,8 +26,9 @@ backend, as no such contract exists yet.
 - Current publication: Phase 1 commit `4659fab647078b75015761857fd4baf317b5f64e`,
   Phase 2 commit `fc71f8b0178fbde82ffa2eebbffa43b9057e3699`, Phase 3 baseline
   `d8edafe9724a3cca3004c5ecb4708c9da6bd6928`, and Phase 3 hardening commit
-  `e7cc7a8` are present on `main` and pushed to `origin/main`.
-- Local CI-equivalent: `make check` **PASS** on `e7cc7a8` — 410 Python tests passed
+  `e7cc7a8`, and final test/evidence commit `c75c489` are present on `main` and
+  pushed to `origin/main`.
+- Local CI-equivalent: `make check` **PASS** on `c75c489` — 411 Python tests passed
   with 1 provider-contract skip, parser/ingestion/migration/feedback gates passed,
   38 frontend tests passed, and the preserved desktop plus tablet/mobile Playwright
   suite passed 3/3. Frontend lint retained one existing `react-refresh` warning.
@@ -72,7 +73,7 @@ production parser. Running the private benchmark is what closes both phases.
 | 0 | Repository and deterministic development foundation | COMPLETE | `941a5c4`; CI run `31787161450` |
 | 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Commit `4659fab`; harness, adapters, router, CanonicalDocument v1 and local CI gates complete; ADR-001 `PENDING EVIDENCE` |
 | 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Commit `fc71f8b`; ingestion pipeline, APIs, schema, admin parser and local Phase 2 gates complete; production parser strategy still blocked on ADR-001 |
-| 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
+| 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`/`c75c489`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
 | 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
@@ -239,9 +240,9 @@ ADR-001 Decision section and set it to `ACCEPTED`.
 
 ### Phase 3 progress — 2026-08-17
 
-- Commit/PR: baseline `d8edafe9724a3cca3004c5ecb4708c9da6bd6928` and hardening
-  `e7cc7a8` are pushed to `main`; no separate PR reference was observable from this
-  checkout.
+- Commit/PR: baseline `d8edafe9724a3cca3004c5ecb4708c9da6bd6928`, implementation
+  hardening `e7cc7a8`, and final test/evidence repair `c75c489` are pushed to `main`;
+  no separate PR reference was observable from this checkout.
 - Test commands: **PASS** — `make web-component-tests` (38 tests), `make feedback-tests`
   (13 tests), `make web-e2e-smoke` (desktop 1/1 plus tablet/mobile 2/2),
   `make frontend-format-check`, `make frontend-lint`, `make frontend-typecheck`,
