@@ -34,7 +34,7 @@ from ..canonical import (
 )
 from . import patterns as pat
 
-ADMIN_PARSER_VERSION = "1.0"
+ADMIN_PARSER_VERSION = "1.1"
 EXTRACTOR_NAME = "admin-rule-v1"
 
 # Fields the product treats as critical. A missing one is a review flag, not an error.
@@ -392,7 +392,7 @@ def _classify_block(state: _StructureState, block: CanonicalBlock) -> None:
         update.attributes["admin_role"] = "subject"
         return
 
-    if pat.strip_accents_upper(line) in {pat.strip_accents_upper(k) for k in pat.TYPE_HEADINGS}:
+    if pat.compact_matching_key(line) in {pat.compact_matching_key(k) for k in pat.TYPE_HEADINGS}:
         update.block_type = BlockType.TITLE
         update.attributes["admin_role"] = "document_type_heading"
         return
@@ -419,6 +419,81 @@ class _FieldCandidate:
     page_numbers: list[int]
 
 
+@dataclass(frozen=True)
+class _DateEvidence:
+    block: CanonicalBlock
+    raw: str
+    normalized_value: str
+    referenced: bool
+    deadline: bool
+    score: float
+
+
+def _top_score(block: CanonicalBlock, page_heights: dict[int, float]) -> float:
+    """Score only reliable layout evidence; absent boxes do not become guesses."""
+    if block.bbox is None:
+        return 0.0
+    height = page_heights.get(block.provenance.page_number, 842.0)
+    ratio = block.bbox.y0 / height
+    if ratio <= 0.25:
+        return 0.16
+    if ratio <= 0.40:
+        return 0.09
+    return 0.0
+
+
+def _nearby_score(block: CanonicalBlock, context_blocks: list[CanonicalBlock]) -> float:
+    score = 0.0
+    for context in context_blocks:
+        if context.provenance.page_number != block.provenance.page_number:
+            continue
+        distance = abs(context.reading_order - block.reading_order)
+        if distance <= 1:
+            score = max(score, 0.12)
+        elif distance <= 3:
+            score = max(score, 0.08)
+        elif distance <= 6:
+            score = max(score, 0.04)
+    return score
+
+
+def _context_blocks(blocks: list[CanonicalBlock]) -> list[CanonicalBlock]:
+    result: list[CanonicalBlock] = []
+    for block in blocks:
+        line = pat.first_line(block.text)
+        normalized = pat.strip_accents_upper(line)
+        compact = pat.compact_matching_key(line)
+        if block.type == BlockType.HEADER:
+            result.append(block)
+            continue
+        if pat.NUMBER_RE.match(line) or pat.NUMBER_INLINE_RE.search(line):
+            result.append(block)
+            continue
+        if any(
+            normalized.startswith(pat.strip_accents_upper(prefix))
+            or compact.startswith(pat.compact_matching_key(prefix))
+            for prefix in pat.ISSUER_PREFIXES
+        ):
+            result.append(block)
+            continue
+        if pat.SUBJECT_RE.match(line) or compact in {
+            pat.compact_matching_key(heading) for heading in pat.TYPE_HEADINGS
+        }:
+            result.append(block)
+    return result
+
+
+def _date_marker_kind(text: str, match: pat.DateMatch) -> tuple[bool, bool]:
+    before = text[max(0, match.start - 80) : match.start]
+    after = text[match.end : match.end + 48]
+    deadline = (
+        pat.marker_position(before, pat.DEADLINE_MARKERS + pat.DEADLINE_DATE_PREFIXES) is not None
+    )
+    referenced = pat.marker_position(before, pat.REFERENCE_DATE_MARKERS) is not None
+    referenced = referenced or pat.marker_position(after, ("có hiệu lực", "của")) is not None
+    return referenced, deadline
+
+
 def _make_field(candidate: _FieldCandidate, index: int) -> ExtractedField:
     needs_review = candidate.confidence < REVIEW_CONFIDENCE_THRESHOLD
     return ExtractedField(
@@ -439,25 +514,58 @@ def _body_blocks(document: CanonicalDocument) -> list[CanonicalBlock]:
     return [block for block in document.iter_blocks() if block.type not in FURNITURE_TYPES]
 
 
-def _extract_number(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
+def _extract_number(
+    blocks: list[CanonicalBlock],
+    page_heights: dict[int, float] | None = None,
+) -> _FieldCandidate | None:
+    page_heights = page_heights or {}
+    candidates: list[tuple[_FieldCandidate, float]] = []
     for block in blocks:
         line = pat.first_line(block.text)
         match = pat.NUMBER_RE.match(line) or pat.NUMBER_INLINE_RE.search(line)
         if match is None:
             continue
-        value = match.group(1).strip().rstrip(".,;")
+        value = pat.normalize_document_number(match.group(1).strip().rstrip(".,;"))
         if not value:
             continue
-        return _FieldCandidate(
+        candidate = _FieldCandidate(
             name="document_number",
             raw_value=line,
             normalized_value=value,
             value_type="string",
-            confidence=0.95 if "/" in value else 0.7,
+            confidence=0.0,
             block_ids=[block.id],
             page_numbers=[block.provenance.page_number],
         )
-    return None
+        score = 0.64
+        if block.provenance.page_number == 1:
+            score += 0.14
+        score += _top_score(block, page_heights)
+        score += 0.06 if block.reading_order <= 5 else 0.0
+        score += 0.08 if "/" in value else 0.0
+        score += 0.02 if block.provenance.provider_block_id else 0.0
+        if block.confidence is not None:
+            score = 0.75 * score + 0.25 * block.confidence
+        candidates.append((candidate, min(score, 0.98)))
+
+    if not candidates:
+        return None
+    by_value: dict[str, tuple[_FieldCandidate, float]] = {}
+    for candidate, score in candidates:
+        if score > by_value.get(candidate.normalized_value, (candidate, -1.0))[1]:
+            by_value[candidate.normalized_value] = (candidate, score)
+    ordered = sorted(by_value.values(), key=lambda item: item[1], reverse=True)
+    if len(ordered) > 1:
+        if ordered[0][1] - ordered[1][1] < 0.08:
+            selected, score = ordered[0]
+            selected.confidence = min(score, 0.6)
+            return selected
+        selected, score = ordered[0]
+        selected.confidence = min(score, 0.65)
+        return selected
+    selected, score = ordered[0]
+    selected.confidence = score
+    return selected
 
 
 def _extract_document_type(
@@ -466,9 +574,9 @@ def _extract_document_type(
 ) -> _FieldCandidate | None:
     for block in blocks[:25]:
         line = pat.first_line(block.text)
-        normalized = pat.strip_accents_upper(line)
+        normalized = pat.compact_matching_key(line)
         for heading, type_name in pat.TYPE_HEADINGS.items():
-            if normalized == pat.strip_accents_upper(heading):
+            if normalized == pat.compact_matching_key(heading):
                 return _FieldCandidate(
                     name="document_type",
                     raw_value=line,
@@ -500,7 +608,12 @@ def _extract_issuer(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
     for block in blocks[:15]:
         line = pat.first_line(block.text)
         normalized = pat.strip_accents_upper(line)
-        if not any(normalized.startswith(pat.strip_accents_upper(p)) for p in pat.ISSUER_PREFIXES):
+        compact = pat.compact_matching_key(line)
+        if not any(
+            normalized.startswith(pat.strip_accents_upper(prefix))
+            or compact.startswith(pat.compact_matching_key(prefix))
+            for prefix in pat.ISSUER_PREFIXES
+        ):
             continue
         if pat.NUMBER_RE.match(line):
             continue
@@ -517,28 +630,79 @@ def _extract_issuer(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
     return None
 
 
-def _extract_issue_date(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
-    for block in blocks[:20]:
-        line = pat.first_line(block.text)
-        lowered = line.lower()
-        if any(marker in lowered for marker in pat.DEADLINE_MARKERS):
-            continue
-        parsed = pat.parse_vietnamese_date(line)
-        if parsed is None:
-            continue
-        raw, iso = parsed
-        # The place-and-date line is the canonical issue-date carrier.
-        confidence = 0.95 if "," in line and "ngày" in lowered else 0.75
-        return _FieldCandidate(
-            name="issue_date",
-            raw_value=raw,
-            normalized_value=iso,
-            value_type="date",
-            confidence=confidence,
-            block_ids=[block.id],
-            page_numbers=[block.provenance.page_number],
-        )
-    return None
+def _extract_issue_date(
+    blocks: list[CanonicalBlock],
+    context_blocks: list[CanonicalBlock] | None = None,
+    page_heights: dict[int, float] | None = None,
+    date_blocks: list[CanonicalBlock] | None = None,
+) -> _FieldCandidate | None:
+    context_blocks = context_blocks or []
+    page_heights = page_heights or {}
+    evidence: list[_DateEvidence] = []
+    for block in date_blocks or blocks:
+        for match in pat.parse_vietnamese_dates(block.text):
+            referenced, deadline = _date_marker_kind(block.text, match)
+            if deadline:
+                continue
+            score = 0.54
+            if block.provenance.page_number == 1:
+                score += 0.14
+            if block.type == BlockType.HEADER:
+                score += 0.02
+            score += _top_score(block, page_heights)
+            score += _nearby_score(block, context_blocks)
+            if any(
+                item.provenance.page_number == block.provenance.page_number
+                and item.type == BlockType.HEADER
+                for item in context_blocks
+            ):
+                score += 0.03
+            if "," in block.text and "NGAY" in pat.strip_accents_upper(block.text):
+                score += 0.07
+            if block.provenance.provider_block_id:
+                score += 0.02
+            if block.confidence is not None:
+                score = 0.75 * score + 0.25 * block.confidence
+            if referenced:
+                score = min(score, 0.6)
+            elif block.provenance.page_number != 1:
+                # A later-page date may be useful evidence for a reviewer, but it
+                # cannot become an unreviewed issue date without page-one heading
+                # support.
+                score = min(score, 0.64)
+            evidence.append(
+                _DateEvidence(block, match.raw, match.iso, referenced, deadline, min(score, 0.98))
+            )
+
+    if not evidence:
+        return None
+    unreferenced = [item for item in evidence if not item.referenced]
+    # A reference date is useful review context, but it is not evidence that the
+    # current document was issued on that date.  Do not surface it as issue_date
+    # when no unqualified header candidate exists.
+    if not unreferenced:
+        return None
+    distinct_dates = {item.normalized_value for item in unreferenced}
+    ordered = sorted(unreferenced, key=lambda item: item.score, reverse=True)
+    if len(distinct_dates) > 1:
+        if len(ordered) > 1 and ordered[0].score - ordered[1].score < 0.05:
+            selected = ordered[0]
+            confidence = min(selected.score, 0.6)
+        else:
+            selected = ordered[0]
+            confidence = min(selected.score, 0.65)
+    else:
+        selected = ordered[0]
+        confidence = selected.score
+    return _FieldCandidate(
+        name="issue_date",
+        raw_value=selected.raw,
+        normalized_value=selected.normalized_value,
+        value_type="date",
+        confidence=confidence,
+        block_ids=[selected.block.id],
+        page_numbers=[selected.block.provenance.page_number],
+    )
 
 
 def _extract_title(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
@@ -559,9 +723,9 @@ def _extract_title(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
                 )
 
     # Fallback: the uppercase line right after a spelled-out document-type heading.
-    type_headings = {pat.strip_accents_upper(key) for key in pat.TYPE_HEADINGS}
+    type_headings = {pat.compact_matching_key(key) for key in pat.TYPE_HEADINGS}
     for index, block in enumerate(blocks[:30]):
-        if pat.strip_accents_upper(pat.first_line(block.text)) not in type_headings:
+        if pat.compact_matching_key(pat.first_line(block.text)) not in type_headings:
             continue
         for follower in blocks[index + 1 : index + 4]:
             line = pat.first_line(follower.text)
@@ -620,28 +784,26 @@ def _extract_deadline(blocks: list[CanonicalBlock]) -> _FieldCandidate | None:
     """Only explicit, dated deadline expressions are returned."""
     for block in blocks:
         text = block.text
-        lowered = text.lower()
-        marker = next((item for item in pat.DEADLINE_MARKERS if item in lowered), None)
-        if marker is None:
-            continue
-
-        tail = text[lowered.index(marker) :]
-        parsed = pat.parse_vietnamese_date(tail)
-        if parsed is None:
-            continue
-        raw, iso = parsed
-        confidence = 0.9 if marker.endswith("ngày") else 0.75
-        if confidence < DEADLINE_MIN_CONFIDENCE:
-            continue
-        return _FieldCandidate(
-            name="deadline",
-            raw_value=f"{marker} {raw}".strip(),
-            normalized_value=iso,
-            value_type="date",
-            confidence=confidence,
-            block_ids=[block.id],
-            page_numbers=[block.provenance.page_number],
-        )
+        for match in pat.parse_vietnamese_dates(text):
+            marker = pat.marker_position(
+                text[: match.start], pat.DEADLINE_MARKERS + pat.DEADLINE_DATE_PREFIXES
+            )
+            if marker is None:
+                continue
+            marker_start, _ = marker
+            marker_text = text[marker_start : match.end]
+            confidence = 0.9 if "ngày" in marker_text.lower() else 0.75
+            if confidence < DEADLINE_MIN_CONFIDENCE:
+                continue
+            return _FieldCandidate(
+                name="deadline",
+                raw_value=marker_text,
+                normalized_value=match.iso,
+                value_type="date",
+                confidence=confidence,
+                block_ids=[block.id],
+                page_numbers=[block.provenance.page_number],
+            )
     return None
 
 
@@ -649,9 +811,17 @@ def _extract_fields(
     document: CanonicalDocument,
 ) -> tuple[list[ExtractedField], str | None]:
     blocks = _body_blocks(document)
+    context_blocks = _context_blocks(
+        [
+            block
+            for block in document.iter_blocks()
+            if block.type not in {BlockType.FOOTER, BlockType.PAGE_NUMBER}
+        ]
+    )
+    page_heights = {page.page_number: page.height for page in document.pages}
     candidates: list[_FieldCandidate] = []
 
-    number = _extract_number(blocks)
+    number = _extract_number(blocks, page_heights)
     if number is not None:
         candidates.append(number)
 
@@ -659,10 +829,22 @@ def _extract_fields(
     if document_type is not None:
         candidates.append(document_type)
 
-    for extractor in (_extract_issuer, _extract_issue_date, _extract_title):
-        candidate = extractor(blocks)
-        if candidate is not None:
-            candidates.append(candidate)
+    issuer = _extract_issuer(blocks)
+    if issuer is not None:
+        candidates.append(issuer)
+
+    date_blocks = [
+        block
+        for block in document.iter_blocks()
+        if block.type not in {BlockType.FOOTER, BlockType.PAGE_NUMBER}
+    ]
+    issue_date = _extract_issue_date(blocks, context_blocks, page_heights, date_blocks)
+    if issue_date is not None:
+        candidates.append(issue_date)
+
+    title = _extract_title(blocks)
+    if title is not None:
+        candidates.append(title)
 
     signer, signature_block_id = _extract_signer(blocks)
     if signer is not None:

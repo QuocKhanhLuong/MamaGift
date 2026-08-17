@@ -10,21 +10,42 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import date
 
 # --------------------------------------------------------------------- hierarchy
 
-CHAPTER_RE = re.compile(r"^CHƯƠNG\s+([IVXLCDM]+|\d+)\s*[.:\-–]?\s*(.*)$", re.IGNORECASE)
-SECTION_RE = re.compile(r"^MỤC\s+([IVXLCDM]+|\d+)\s*[.:\-–]?\s*(.*)$", re.IGNORECASE)
-ARTICLE_RE = re.compile(r"^ĐIỀU\s+(\d+)\s*[.:\-–]?\s*(.*)$", re.IGNORECASE)
-APPENDIX_RE = re.compile(r"^PHỤ\s*LỤC\s*([IVXLCDM]+|\d+)?\s*[.:\-–]?\s*(.*)$", re.IGNORECASE)
+CHAPTER_RE = re.compile(
+    r"^(?:CHƯƠNG|CHUONG)\s{0,2}([IVXLCDM]+|\d+)\s*[.:\-–]?\s*(.*)$",
+    re.IGNORECASE,
+)
+SECTION_RE = re.compile(
+    r"^(?:MỤC|MUC)\s{0,2}([IVXLCDM]+|\d+)\s*[.:\-–]?\s*(.*)$",
+    re.IGNORECASE,
+)
+# These are bounded OCR alternatives, not a general fuzzy matcher.  In particular,
+# `Điu` is a frequent OCR rendering of `Điều` in low-resolution scans.
+ARTICLE_RE = re.compile(
+    r"^(?:ĐIỀU|ĐIU|DIEU|DIU)\s{0,2}(\d+)\s*[.:\-–]?\s*(.*)$",
+    re.IGNORECASE,
+)
+APPENDIX_RE = re.compile(
+    r"^(?:PHỤ\s*LỤC|PHU\s*LUC)\s*([IVXLCDM]+|\d+)?\s*[.:\-–]?\s*(.*)$",
+    re.IGNORECASE,
+)
 
 # `Khoản 2. ...` written out, and the far more common bare `2. ...` inside an article.
-CLAUSE_LABELLED_RE = re.compile(r"^KHOẢN\s+(\d+)\s*[.:\-–]?\s*(.*)$", re.IGNORECASE)
+CLAUSE_LABELLED_RE = re.compile(
+    r"^(?:KHOẢN|KHON|KHOAN)\s{0,2}(\d+)\s*[.:\-–]?\s*(.*)$",
+    re.IGNORECASE,
+)
 CLAUSE_NUMERIC_RE = re.compile(r"^(\d{1,2})\s*[.)]\s+(.+)$")
 
 # `Điểm a) ...` written out, and the bare `a) ...` form.
-POINT_LABELLED_RE = re.compile(r"^ĐIỂM\s+([a-zđăâêôơư])\s*[.:\-–)]?\s*(.*)$", re.IGNORECASE)
+POINT_LABELLED_RE = re.compile(
+    r"^(?:ĐIỂM|ĐIEM|DIEM)\s{0,2}([a-zđăâêôơư])\s*[.:\-–)]?\s*(.*)$",
+    re.IGNORECASE,
+)
 POINT_LETTER_RE = re.compile(r"^([a-zđăâêôơư])\s*[).]\s+(.+)$")
 
 # --------------------------------------------------------------------------- lists
@@ -36,13 +57,31 @@ BULLET_RE = re.compile(r"^[-–—•*+]\s+(.+)$")
 # The `\s{0,N}` bounds are load-bearing, not cosmetic: `normalize_text` collapses only
 # ASCII/Unicode space separators, so runs of U+3000 or \x0c reach these patterns intact,
 # and unbounded back-to-back `\s*` around a group that can fail backtracks quadratically.
-NUMBER_RE = re.compile(r"^SỐ\s{0,8}[:.]?\s{0,8}([^\s;,]+)", re.IGNORECASE)
-NUMBER_INLINE_RE = re.compile(r"\bSỐ\s{0,8}[:.]\s{0,8}([^\s;,]+)", re.IGNORECASE)
-SUBJECT_RE = re.compile(r"^(?:V/v|V\.v|Về\s+việc)\s*[:.]?\s*(.+)$", re.IGNORECASE)
+_NUMBER_LABEL = r"(?:SỐ|SO|S)"
+_NUMBER_VALUE = (
+    r"([0-9]{1,8}(?:\s{0,2}/\s{0,2}[0-9A-Za-zĐđ.]+(?:\s{0,2}-\s{0,2}[0-9A-Za-zĐđ.]+)*)?)"
+)
+NUMBER_RE = re.compile(rf"^{_NUMBER_LABEL}\s{{0,2}}[:.]?\s{{0,2}}{_NUMBER_VALUE}", re.IGNORECASE)
+NUMBER_INLINE_RE = re.compile(
+    rf"\b{_NUMBER_LABEL}\s{{0,2}}[:.]\s{{0,2}}{_NUMBER_VALUE}", re.IGNORECASE
+)
+SUBJECT_RE = re.compile(
+    r"^(?:V/v|V\.v|Về\s{0,2}việc|Ve\s{0,2}viec)\s*[:.]?\s*(.+)$",
+    re.IGNORECASE,
+)
 RECIPIENTS_RE = re.compile(r"^NƠI\s*NHẬN\s*[:.]?\s*(.*)$", re.IGNORECASE)
 ADDRESSEE_RE = re.compile(r"^KÍNH\s*GỬI\s*[:.]?\s*(.*)$", re.IGNORECASE)
 
-DATE_RE = re.compile(r"ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(\d{4})", re.IGNORECASE)
+DATE_RE = re.compile(
+    r"(?:ngày|ngay)\s{1,2}(\d{1,2})\s{1,2}(?:tháng|thang)\s{1,2}"
+    r"(\d{1,2})\s{1,2}(?:năm|nam)\s{1,2}(\d{4})",
+    re.IGNORECASE,
+)
+COMPACT_DATE_RE = re.compile(
+    r"(?:ngày|ngay)\s{0,1}(\d{1,2})\s{0,1}(?:tháng|thang)\s{0,1}"
+    r"(\d{1,2})\s{0,1}(?:năm|nam)\s{0,1}(\d{4})",
+    re.IGNORECASE,
+)
 NUMERIC_DATE_RE = re.compile(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b")
 
 DEADLINE_MARKERS = (
@@ -55,6 +94,35 @@ DEADLINE_MARKERS = (
     "báo cáo trước",
     "nộp trước",
     "trước thời hạn",
+)
+DEADLINE_DATE_PREFIXES = tuple(
+    dict.fromkeys(
+        marker.removesuffix(" ngày") for marker in DEADLINE_MARKERS if marker.endswith(" ngày")
+    )
+)
+
+# A date following one of these markers is a reference/effective date, not an
+# unqualified issue date.  Keep this list explicit so ordinary prose is not
+# reclassified by fuzzy similarity.
+REFERENCE_DATE_MARKERS = (
+    "căn cứ",
+    "căn cứ quyết định số",
+    "căn cứ công văn số",
+    "theo",
+    "theo quyết định số",
+    "theo công văn số",
+    "quyết định số",
+    "công văn số",
+    "văn bản số",
+    "nghị định số",
+    "luật số",
+    "kể từ ngày",
+    "từ ngày",
+    "sau ngày",
+    "đến ngày",
+    "ngày ký",
+    "có hiệu lực từ",
+    "có hiệu lực ngày",
 )
 
 # Signature-block role markers. The signer name is the line that follows them.
@@ -169,24 +237,64 @@ def ordinal_of(label: str) -> int | None:
     return roman_to_int(stripped)
 
 
+@dataclass(frozen=True)
+class DateMatch:
+    raw: str
+    iso: str
+    start: int
+    end: int
+
+
+def parse_vietnamese_dates(text: str) -> list[DateMatch]:
+    """Enumerate valid Vietnamese and numeric dates without rewriting source text."""
+    matches: list[DateMatch] = []
+    seen: set[tuple[int, int, str]] = set()
+    for pattern in (DATE_RE, COMPACT_DATE_RE, NUMERIC_DATE_RE):
+        for match in pattern.finditer(text):
+            day, month, year = (int(group) for group in match.groups())
+            iso = _iso_or_none(year, month, day)
+            if iso is None:
+                continue
+            key = (match.start(), match.end(), iso)
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(DateMatch(match.group(0), iso, match.start(), match.end()))
+    return sorted(matches, key=lambda item: (item.start, item.end))
+
+
 def parse_vietnamese_date(text: str) -> tuple[str, str] | None:
     """Return `(raw_expression, ISO date)` for the first date found, else None.
 
     Only real calendar dates are returned; `ngày 31 tháng 2` is not silently coerced.
     """
-    match = DATE_RE.search(text)
-    if match is not None:
-        day, month, year = (int(group) for group in match.groups())
-        iso = _iso_or_none(year, month, day)
-        return (match.group(0), iso) if iso is not None else None
+    matches = parse_vietnamese_dates(text)
+    return None if not matches else (matches[0].raw, matches[0].iso)
 
-    numeric = NUMERIC_DATE_RE.search(text)
-    if numeric is not None:
-        day, month, year = (int(group) for group in numeric.groups())
-        iso = _iso_or_none(year, month, day)
-        return (numeric.group(0), iso) if iso is not None else None
 
-    return None
+def normalize_document_number(value: str) -> str:
+    """Normalize only separator spacing; preserve the captured raw value elsewhere."""
+    return re.sub(r"\s*([/-])\s*", r"\1", re.sub(r"\s+", "", value))
+
+
+def marker_position(
+    text: str,
+    markers: tuple[str, ...],
+    *,
+    before: int | None = None,
+) -> tuple[int, str] | None:
+    """Return the first explicit marker position, with bounded accent tolerance."""
+    folded = strip_accents_upper(text)
+    candidates: list[tuple[int, str]] = []
+    for marker in markers:
+        for haystack, needle in (
+            (text.lower(), marker.lower()),
+            (folded, strip_accents_upper(marker)),
+        ):
+            position = haystack.find(needle)
+            if position >= 0 and (before is None or position < before):
+                candidates.append((position, text[position : position + len(marker)]))
+    return min(candidates, key=lambda item: item[0]) if candidates else None
 
 
 def _iso_or_none(year: int, month: int, day: int) -> str | None:
@@ -198,8 +306,13 @@ def _iso_or_none(year: int, month: int, day: int) -> str | None:
 
 def strip_accents_upper(text: str) -> str:
     """Accent-insensitive uppercase form, for tolerant keyword matching only."""
-    decomposed = unicodedata.normalize("NFD", text.upper())
+    decomposed = unicodedata.normalize("NFD", text.upper().replace("Đ", "D"))
     return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def compact_matching_key(text: str) -> str:
+    """Return a bounded accent/whitespace-tolerant key for administrative labels."""
+    return re.sub(r"\s+", "", strip_accents_upper(text))
 
 
 def is_mostly_upper(text: str) -> bool:
