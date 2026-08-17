@@ -195,6 +195,49 @@ def _route_from_pages(pages: list[PageSignals]) -> tuple[Route, float, list[str]
     return Route.SCANNED, 0.4, warnings
 
 
+class PdfValidation(BaseModel):
+    """Cheap upload-time verdict on raw bytes, before anything is persisted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    is_pdf: bool
+    encrypted: bool = False
+    page_count: int = 0
+    detail: str = ""
+
+
+PDF_MAGIC = b"%PDF-"
+
+
+def validate_pdf_bytes(data: bytes) -> PdfValidation:
+    """Validate uploaded bytes as a readable, non-encrypted PDF.
+
+    Lives here rather than in the API service so PyMuPDF stays inside the document
+    pipeline package, in its documented PDF-utility role.
+    """
+    import pymupdf
+
+    if not data.startswith(PDF_MAGIC):
+        return PdfValidation(is_pdf=False, detail="missing %PDF- header")
+
+    try:
+        document = pymupdf.open(stream=data, filetype="pdf")
+    except Exception as exc:
+        return PdfValidation(is_pdf=False, detail=f"could not open document: {type(exc).__name__}")
+
+    with document:
+        if document.needs_pass:
+            return PdfValidation(
+                is_pdf=True,
+                encrypted=True,
+                page_count=document.page_count,
+                detail="document is password protected",
+            )
+        if document.page_count < 1:
+            return PdfValidation(is_pdf=False, detail="document has no pages")
+        return PdfValidation(is_pdf=True, page_count=document.page_count)
+
+
 def inspect_pdf(pdf_path: str | Path, document_id: str | None = None) -> InspectionReport:
     """Inspect a PDF and return its route label plus diagnostic signals.
 

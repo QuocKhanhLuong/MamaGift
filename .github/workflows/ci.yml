@@ -190,6 +190,98 @@ jobs:
       - name: Router, canonical schema and adapter contract tests
         run: uv run pytest tests/unit tests/contract -q
 
+  ingestion-integration:
+    name: ingestion-integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Upload, storage, state machine, jobs and the full upload -> canonical path.
+      # No GPU, no private documents: the CI-safe baseline parser is the only one run.
+      - name: Ingestion integration tests
+        run: |
+          uv run pytest \
+            services/api/tests/test_upload_api.py \
+            services/api/tests/test_jobs.py \
+            services/api/tests/test_storage.py \
+            services/api/tests/test_state_machine.py \
+            services/api/tests/test_ingestion_integration.py \
+            tests/unit/test_ingestion_pipeline.py \
+            tests/unit/test_parser_strategy.py -q
+
+  admin-parser-golden-tests:
+    name: admin-parser-golden-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Vietnamese administrative parser golden tests
+        run: uv run pytest tests/golden -q
+
+  db-migration-test:
+    name: db-migration-test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mamagift
+          POSTGRES_USER: mamagift
+          POSTGRES_PASSWORD: mamagift
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mamagift -d mamagift"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Apply migrations from an empty PostgreSQL database
+        env:
+          MAMAGIFT_TEST_DATABASE_URL: postgresql+psycopg://mamagift:mamagift@localhost:5432/mamagift
+        run: uv run pytest services/api/tests/test_migrations.py -q
+
   parser-benchmark-smoke:
     name: parser-benchmark-smoke
     runs-on: ubuntu-latest

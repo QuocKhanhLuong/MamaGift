@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "adr_status": "EXAMPLE — NOT A DECISION",
+  "decided": false,
+  "baseline_parser": "pymupdf",
+  "baseline_promoted_by_benchmark": false,
+  "allow_baseline_when_undecided": true,
+  "routes": {
+    "born_digital": { "capability": "born_digital_text", "primary": null, "fallbacks": [] },
+    "scanned": { "capability": "ocr", "primary": null, "fallbacks": [] },
+    "mixed": { "capability": "ocr_and_text", "primary": null, "fallbacks": [] },
+    "garbled_text_layer": { "capability": "ocr", "primary": null, "fallbacks": [] }
+  }
+}

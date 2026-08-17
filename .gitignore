@@ -18,6 +18,9 @@ apps/web/dist/
 *.db
 infra/compose/postgres-data/
 
+# Uploaded originals are user data and never belong in the repository.
+var/
+
 # Benchmark run output; only curated summaries are ever committed.
 artifacts/
 benchmarks/parser/recordings/

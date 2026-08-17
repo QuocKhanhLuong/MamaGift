@@ -19,6 +19,7 @@ class ParserErrorCode(StrEnum):
     PROVIDER_FAILURE = "provider_failure"
     NORMALIZATION_FAILURE = "normalization_failure"
     RECORDING_MISSING = "recording_missing"
+    PARSER_STRATEGY_UNDECIDED = "parser_strategy_undecided"
 
 
 RETRYABLE_CODES = frozenset(

@@ -236,6 +236,10 @@ every PDF.
 - Phase 2 is blocked on a private benchmark run, not on more code.
 - Because every provider sits behind `DocumentParser`, the eventual decision changes a
   registry entry and a configuration, not the pipeline.
+- Phase 2 consumes this open decision through a configurable parser strategy rather
+  than waiting for it; see `docs/decisions/ADR-002-ingestion-parser-strategy.md`.
+  Until this ADR is decided, every Phase 2 parse run is marked `degraded` and flagged
+  for user review, and production environments refuse to parse at all.
 
 ## References
 
@@ -245,3 +249,5 @@ every PDF.
 - `docs/08_API_AND_DATA_CONTRACTS.md` — CanonicalDocument v1
 - `benchmarks/parser/README.md` — corpus and private-run instructions
 - `tools/parser_bench/README.md` — harness internals
+- `docs/decisions/ADR-002-ingestion-parser-strategy.md` — how Phase 2 consumes this
+  open decision without guessing

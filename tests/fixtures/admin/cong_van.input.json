@@ -1,0 +1,37 @@
+{
+  "document_id": "golden_cong_van",
+  "notes": "Invented official letter. Number, place-and-date line, V/v subject, numbered list, deadline, Nơi nhận and a signature block. No real person or organisation.",
+  "pages": [
+    {
+      "page_number": 1,
+      "blocks": [
+        { "type": "header", "text": "Công văn số 1234/UBND-VP" },
+        { "type": "paragraph", "text": "ỦY BAN NHÂN DÂN XÃ MAI GIANG" },
+        { "type": "paragraph", "text": "Số: 1234/UBND-VP" },
+        { "type": "paragraph", "text": "Mai Giang, ngày 14 tháng 8 năm 2026" },
+        { "type": "paragraph", "text": "V/v hướng dẫn nộp hồ sơ tuyển sinh năm học 2026-2027" },
+        { "type": "paragraph", "text": "Kính gửi: Hiệu trưởng các trường tiểu học trong xã." },
+        { "type": "paragraph", "text": "Thực hiện kế hoạch tuyển sinh, Ủy ban nhân dân xã đề nghị các đơn vị triển khai:" },
+        { "type": "paragraph", "text": "1. Niêm yết công khai chỉ tiêu tuyển sinh." },
+        { "type": "paragraph", "text": "2. Tiếp nhận hồ sơ trực tiếp và trực tuyến." },
+        { "type": "paragraph", "text": "3. Báo cáo kết quả tiếp nhận hồ sơ về Văn phòng." },
+        { "type": "footer", "text": "Trang 1/2" }
+      ]
+    },
+    {
+      "page_number": 2,
+      "blocks": [
+        { "type": "header", "text": "Công văn số 1234/UBND-VP" },
+        { "type": "paragraph", "text": "Báo cáo gửi về Văn phòng trước ngày 25 tháng 8 năm 2026." },
+        { "type": "paragraph", "text": "Đề nghị các đơn vị nghiêm túc thực hiện." },
+        { "type": "paragraph", "text": "Nơi nhận:" },
+        { "type": "paragraph", "text": "- Như trên;" },
+        { "type": "paragraph", "text": "- Lưu: VT, VP." },
+        { "type": "paragraph", "text": "KT. CHỦ TỊCH" },
+        { "type": "paragraph", "text": "PHÓ CHỦ TỊCH" },
+        { "type": "paragraph", "text": "Trần Thị Bình" },
+        { "type": "footer", "text": "Trang 2/2" }
+      ]
+    }
+  ]
+}

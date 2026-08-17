@@ -1,0 +1,174 @@
+{
+  "document_id": "golden_quyet_dinh",
+  "block_types": {
+    "b_1_0004": "title",
+    "b_1_0005": "heading",
+    "b_1_0006": "heading",
+    "b_1_0007": "heading",
+    "b_1_0008": "paragraph",
+    "b_1_0009": "heading",
+    "b_1_0010": "list_item",
+    "b_1_0011": "list_item",
+    "b_1_0012": "list_item",
+    "b_1_0013": "list_item",
+    "b_2_0001": "heading",
+    "b_2_0003": "heading",
+    "b_2_0004": "table",
+    "b_2_0005": "table_cell",
+    "b_2_0006": "table_cell",
+    "b_2_0007": "heading",
+    "b_2_0008": "list_item",
+    "b_2_0011": "signature"
+  },
+  "hierarchy": [
+    {
+      "id": "h_chapter_1",
+      "kind": "chapter",
+      "label": "Chương I",
+      "parent_id": null,
+      "ordinal": 1,
+      "source_block_ids": ["b_1_0005"]
+    },
+    {
+      "id": "h_section_1",
+      "kind": "section",
+      "label": "Mục 1",
+      "parent_id": "h_chapter_1",
+      "ordinal": 1,
+      "source_block_ids": ["b_1_0006"]
+    },
+    {
+      "id": "h_article_1",
+      "kind": "article",
+      "label": "Điều 1",
+      "parent_id": "h_section_1",
+      "ordinal": 1,
+      "source_block_ids": ["b_1_0007", "b_1_0008"]
+    },
+    {
+      "id": "h_article_2",
+      "kind": "article",
+      "label": "Điều 2",
+      "parent_id": "h_section_1",
+      "ordinal": 2,
+      "source_block_ids": ["b_1_0009"]
+    },
+    {
+      "id": "h_clause_2_1",
+      "kind": "clause",
+      "label": "Khoản 1",
+      "parent_id": "h_article_2",
+      "ordinal": 1,
+      "source_block_ids": ["b_1_0010"]
+    },
+    {
+      "id": "h_point_2_1_a",
+      "kind": "point",
+      "label": "Điểm a",
+      "parent_id": "h_clause_2_1",
+      "ordinal": null,
+      "source_block_ids": ["b_1_0011"]
+    },
+    {
+      "id": "h_point_2_1_b",
+      "kind": "point",
+      "label": "Điểm b",
+      "parent_id": "h_clause_2_1",
+      "ordinal": null,
+      "source_block_ids": ["b_1_0012"]
+    },
+    {
+      "id": "h_clause_2_2",
+      "kind": "clause",
+      "label": "Khoản 2",
+      "parent_id": "h_article_2",
+      "ordinal": 2,
+      "source_block_ids": ["b_1_0013"]
+    },
+    {
+      "id": "h_article_3",
+      "kind": "article",
+      "label": "Điều 3",
+      "parent_id": "h_section_1",
+      "ordinal": 3,
+      "source_block_ids": ["b_2_0001", "b_2_0002"]
+    },
+    {
+      "id": "h_appendix_1",
+      "kind": "appendix",
+      "label": "Phụ lục I",
+      "parent_id": null,
+      "ordinal": 1,
+      "source_block_ids": ["b_2_0003", "b_2_0004", "b_2_0005", "b_2_0006"]
+    },
+    {
+      "id": "h_recipients_1",
+      "kind": "custom_heading",
+      "label": "Nơi nhận",
+      "parent_id": null,
+      "ordinal": null,
+      "source_block_ids": ["b_2_0007", "b_2_0008"]
+    }
+  ],
+  "recipients": ["- Lưu: VT."],
+  "tables": [
+    {
+      "id": "t_admin_2_0001",
+      "page_number": 2,
+      "block_id": "b_2_0004",
+      "n_rows": 3,
+      "n_cols": 3,
+      "cells": [
+        ["STT", "Tên hồ sơ", "Thời hạn lưu"],
+        ["1", "Hồ sơ tuyển sinh", "05 năm"],
+        ["2", "Hồ sơ thi đua", "10 năm"]
+      ]
+    }
+  ],
+  "fields": {
+    "document_number": {
+      "normalized_value": "57/QĐ-UBND",
+      "source_block_ids": ["b_1_0002"],
+      "source_page_numbers": [1],
+      "min_confidence": 0.9
+    },
+    "document_type": {
+      "normalized_value": "quyet_dinh",
+      "source_block_ids": ["b_1_0002"],
+      "source_page_numbers": [1],
+      "min_confidence": 0.75
+    },
+    "issuer": {
+      "normalized_value": "ỦY BAN NHÂN DÂN XÃ MAI GIANG",
+      "source_block_ids": ["b_1_0001"],
+      "source_page_numbers": [1],
+      "min_confidence": 0.8
+    },
+    "issue_date": {
+      "normalized_value": "2026-03-03",
+      "source_block_ids": ["b_1_0003"],
+      "source_page_numbers": [1],
+      "min_confidence": 0.9
+    },
+    "title": {
+      "normalized_value": "ban hành quy chế quản lý hồ sơ hành chính",
+      "source_block_ids": ["b_1_0004"],
+      "source_page_numbers": [1],
+      "min_confidence": 0.85
+    },
+    "deadline": {
+      "normalized_value": "2026-04-30",
+      "source_block_ids": ["b_2_0002"],
+      "source_page_numbers": [2],
+      "min_confidence": 0.85
+    },
+    "signer": {
+      "normalized_value": "Nguyễn Văn An",
+      "source_block_ids": ["b_2_0011"],
+      "source_page_numbers": [2],
+      "min_confidence": 0.75
+    }
+  },
+  "absent_fields": [],
+  "critical_field_warnings": []
+}

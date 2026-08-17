@@ -1,4 +1,8 @@
-"""Alembic environment for the Phase 0 baseline migration."""
+"""Alembic environment.
+
+`app.models` is imported for its side effect: it registers every table on
+`Base.metadata`, which autogenerate compares against.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from app import models as _models  # noqa: F401
 from app.db import Base
 
 config = context.config

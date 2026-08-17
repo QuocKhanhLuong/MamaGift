@@ -89,4 +89,18 @@ Vietnamese administrative documents is private and cannot live in this repositor
 [`benchmarks/parser/README.md`](benchmarks/parser/README.md) for how to run the
 benchmark against a private corpus.
 
-Phase 2 remains blocked until ADR-001 is decided.
+Phase 2 is **in progress**. Ingestion runs end to end: upload with validation and
+content-addressed write-once storage, `documents` / `jobs` / `parse_runs` tables with
+migrations, leases, idempotency, bounded retries and reprocess-as-new-version, the
+inspect to parser-selection to normalize to Vietnamese administrative parser pipeline,
+and APIs for upload, status, document, canonical, original file, page preview and
+reprocess.
+
+Phase 2 is **not production-complete**, because its parser strategy still depends on
+ADR-001. Per [`docs/decisions/ADR-002-ingestion-parser-strategy.md`](docs/decisions/ADR-002-ingestion-parser-strategy.md)
+the strategy is configuration rather than code: with nothing decided, development and
+CI run the PyMuPDF baseline, every parse run is recorded as `degraded` and flagged for
+user review, and a production environment refuses to parse instead of guessing.
+
+Run the pipeline locally with `make dev`, then drain the parse queue with
+`make worker`.

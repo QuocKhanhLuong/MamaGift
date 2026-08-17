@@ -28,6 +28,8 @@ REQUIRED_FILES = [
     "docs/PHASE_STATUS.md",
     "docs/decisions/ADR-0001-phase0-stack.md",
     "docs/decisions/ADR-001-parser-selection.md",
+    "docs/decisions/ADR-002-ingestion-parser-strategy.md",
+    "configs/parser-strategy.example.json",
     "benchmarks/parser/manifest.jsonl",
     "benchmarks/parser/README.md",
     "tools/parser_bench/README.md",

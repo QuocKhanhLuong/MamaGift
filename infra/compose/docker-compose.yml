@@ -25,12 +25,34 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mamagift}:${POSTGRES_PASSWORD:-change-me-for-local-use}@postgres:5432/${POSTGRES_DB:-mamagift}
       AI_WORKER_BASE_URL: ${AI_WORKER_BASE_URL:-http://host.docker.internal:8090}
       AI_WORKER_TOKEN: ${AI_WORKER_TOKEN:-local-fake-worker-token}
+      STORAGE_ROOT: /var/lib/mamagift/storage
+      PARSER_STRATEGY_PATH: ${PARSER_STRATEGY_PATH:-}
     command: ["sh", "-c", "alembic -c services/api/alembic.ini upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "8000:8000"
+    volumes:
+      - document-storage:/var/lib/mamagift/storage
+
+  # The parse worker is a separate process: when it is down, jobs stay queued and
+  # retryable instead of corrupting document state.
+  worker:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mamagift}:${POSTGRES_PASSWORD:-change-me-for-local-use}@postgres:5432/${POSTGRES_DB:-mamagift}
+      STORAGE_ROOT: /var/lib/mamagift/storage
+      PARSER_STRATEGY_PATH: ${PARSER_STRATEGY_PATH:-}
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - document-storage:/var/lib/mamagift/storage
 
   web:
     build:
@@ -45,3 +67,4 @@ services:
 
 volumes:
   postgres-data:
+  document-storage:

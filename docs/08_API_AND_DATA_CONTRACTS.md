@@ -253,6 +253,11 @@ Response `202 Accepted`:
 }
 ```
 
+A byte-identical re-upload is not an error: the original is already durable, so the
+existing document and its job are returned with `200 OK` and
+`"duplicate_of_existing": true`. No second document row and no second stored object
+are created.
+
 Upload validation errors use structured codes:
 
 ```text
@@ -270,11 +275,25 @@ Recommended resource shape:
 ```text
 GET /api/v1/documents
 GET /api/v1/documents/{document_id}
+GET /api/v1/documents/{document_id}/status
 GET /api/v1/documents/{document_id}/canonical
+GET /api/v1/documents/{document_id}/canonical?version={n}
 GET /api/v1/documents/{document_id}/file
 GET /api/v1/documents/{document_id}/pages/{page}/preview
 POST /api/v1/documents/{document_id}/reprocess
 ```
+
+`GET .../status` returns the document, its latest job and its current parse run, so a
+client can show processing state without polling three resources.
+
+`GET .../canonical` returns the current parse run by default. `?version={n}` returns a
+specific historical run: reprocessing adds a version and never overwrites an earlier
+one.
+
+Every parse run carries the parser metadata a reviewer needs to judge it, including
+`parser_name`, `strategy_decided` and `degraded`. A `degraded` run was produced by a
+parser that is not the decided production choice, or that lacks a capability the route
+required.
 
 List supports pagination plus filters that exist in current phase, not speculative filters.
 

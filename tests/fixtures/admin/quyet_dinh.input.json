@@ -1,0 +1,44 @@
+{
+  "document_id": "golden_quyet_dinh",
+  "notes": "Invented decision. Chương/Mục/Điều/Khoản/Điểm hierarchy, an appendix with a pipe-delimited table, and a signature block.",
+  "pages": [
+    {
+      "page_number": 1,
+      "blocks": [
+        { "type": "header", "text": "Quyết định số 57/QĐ-UBND" },
+        { "type": "paragraph", "text": "ỦY BAN NHÂN DÂN XÃ MAI GIANG" },
+        { "type": "paragraph", "text": "Số: 57/QĐ-UBND" },
+        { "type": "paragraph", "text": "Mai Giang, ngày 03 tháng 3 năm 2026" },
+        { "type": "paragraph", "text": "V/v ban hành quy chế quản lý hồ sơ hành chính" },
+        { "type": "paragraph", "text": "Chương I. QUY ĐỊNH CHUNG" },
+        { "type": "paragraph", "text": "Mục 1. Phạm vi và đối tượng" },
+        { "type": "paragraph", "text": "Điều 1. Phạm vi điều chỉnh" },
+        { "type": "paragraph", "text": "Quyết định này quy định việc lập và lưu trữ hồ sơ hành chính." },
+        { "type": "paragraph", "text": "Điều 2. Đối tượng áp dụng" },
+        { "type": "paragraph", "text": "1. Các phòng chuyên môn thuộc Ủy ban." },
+        { "type": "paragraph", "text": "a) Phòng Văn hóa - Xã hội." },
+        { "type": "paragraph", "text": "b) Phòng Tài chính - Kế hoạch." },
+        { "type": "paragraph", "text": "2. Các đơn vị sự nghiệp trực thuộc." },
+        { "type": "footer", "text": "Trang 1/2" }
+      ]
+    },
+    {
+      "page_number": 2,
+      "blocks": [
+        { "type": "header", "text": "Quyết định số 57/QĐ-UBND" },
+        { "type": "paragraph", "text": "Điều 3. Hiệu lực thi hành" },
+        { "type": "paragraph", "text": "Quyết định có hiệu lực từ ngày ký. Rà soát trước ngày 30 tháng 4 năm 2026." },
+        { "type": "paragraph", "text": "Phụ lục I. Danh mục hồ sơ" },
+        { "type": "paragraph", "text": "STT | Tên hồ sơ | Thời hạn lưu" },
+        { "type": "paragraph", "text": "1 | Hồ sơ tuyển sinh | 05 năm" },
+        { "type": "paragraph", "text": "2 | Hồ sơ thi đua | 10 năm" },
+        { "type": "paragraph", "text": "Nơi nhận:" },
+        { "type": "paragraph", "text": "- Lưu: VT." },
+        { "type": "paragraph", "text": "TM. ỦY BAN NHÂN DÂN" },
+        { "type": "paragraph", "text": "CHỦ TỊCH" },
+        { "type": "paragraph", "text": "Nguyễn Văn An" },
+        { "type": "footer", "text": "Trang 2/2" }
+      ]
+    }
+  ]
+}

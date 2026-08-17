@@ -15,6 +15,17 @@ class Settings(BaseSettings):
     ai_worker_token: str = "local-fake-worker-token"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Phase 2 ingestion.
+    storage_root: str = "./var/storage"
+    max_upload_bytes: int = 50 * 1024 * 1024
+    # Path to the parser strategy configuration. Unset means ADR-001 is undecided and
+    # the pipeline may only run the baseline parser outside production.
+    parser_strategy_path: str | None = None
+    job_lease_seconds: int = 300
+    job_max_attempts: int = 3
+    job_retry_backoff_seconds: int = 30
+    page_preview_dpi: int = 110
+
     model_config = SettingsConfigDict(
         env_file=(".env",),
         env_file_encoding="utf-8",

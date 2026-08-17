@@ -12,7 +12,8 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 .PHONY: setup backend-format-check backend-lint backend-typecheck backend-test \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build \
 	compose-config docs-check repository-hygiene secret-scan check dev \
-	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures
+	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
+	ingestion-integration admin-parser-golden-tests db-migration-test worker
 
 setup:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --locked
@@ -65,6 +66,23 @@ parser-fixtures:
 	$(UV_RUN) python benchmarks/parser/generate_fixtures.py
 	$(UV_RUN) python tests/fixtures/generate_recordings.py
 
+# Phase 2 ingestion gates.
+ingestion-integration:
+	$(UV_RUN) pytest services/api/tests/test_upload_api.py services/api/tests/test_jobs.py \
+		services/api/tests/test_storage.py services/api/tests/test_state_machine.py \
+		services/api/tests/test_ingestion_integration.py tests/unit/test_ingestion_pipeline.py \
+		tests/unit/test_parser_strategy.py -q
+
+admin-parser-golden-tests:
+	$(UV_RUN) pytest tests/golden -q
+
+db-migration-test:
+	$(UV_RUN) pytest services/api/tests/test_migrations.py -q
+
+# Drain the parse queue once against the configured database and storage.
+worker:
+	$(UV_RUN) python -m app.worker --once
+
 compose-config:
 	docker compose -f $(COMPOSE_FILE) config --quiet
 
@@ -79,6 +97,7 @@ secret-scan:
 
 check: docs-check repository-hygiene secret-scan backend-format-check backend-lint backend-typecheck backend-test \
 	parser-contract-tests parser-benchmark-smoke \
+	ingestion-integration admin-parser-golden-tests db-migration-test \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config
 
 dev:

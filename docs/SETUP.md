@@ -49,3 +49,41 @@ make docs-check repository-hygiene secret-scan compose-config
 ```
 
 The lockfiles (`uv.lock` and `apps/web/package-lock.json`) are authoritative. Update them deliberately when dependencies change; CI uses locked installs.
+
+## Ingestion (Phase 2)
+
+The API only enqueues work; a separate worker process parses. Compose starts both.
+
+```bash
+docker compose -f infra/compose/docker-compose.yml up --build
+curl -F "file=@benchmarks/parser/fixtures/cong_van_born_digital.pdf;type=application/pdf" \
+  http://localhost:8000/api/v1/documents
+```
+
+The response carries a document id. Poll it, then read the canonical document:
+
+```bash
+curl http://localhost:8000/api/v1/documents/<document_id>/status
+curl http://localhost:8000/api/v1/documents/<document_id>/canonical
+```
+
+Outside Compose, apply migrations and drain the queue once by hand:
+
+```bash
+uv run alembic -c services/api/alembic.ini upgrade head
+make worker
+```
+
+### Parser strategy
+
+`PARSER_STRATEGY_PATH` points at the route table described in
+[`docs/decisions/ADR-002-ingestion-parser-strategy.md`](decisions/ADR-002-ingestion-parser-strategy.md).
+Leave it unset while ADR-001 is `PENDING EVIDENCE`: development and CI then run the
+PyMuPDF baseline, every parse run is recorded as `degraded` and flagged for review, and
+`APP_ENV=production` refuses to parse rather than guess a parser.
+
+### Phase 2 checks
+
+```bash
+make ingestion-integration admin-parser-golden-tests db-migration-test
+```

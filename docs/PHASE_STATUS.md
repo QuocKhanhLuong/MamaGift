@@ -4,7 +4,22 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
-**Phase 1 — PDF parser benchmark and parser decision**
+**Phase 2 — Production ingestion and Vietnamese administrative structure**
+
+Status: `IN_PROGRESS`
+
+Exact `/goal`:
+
+> Turn an uploaded PDF into a versioned, reviewable `CanonicalDocument` with trustworthy Vietnamese administrative structure and critical-field provenance.
+
+Phase 2's deliverables, tests and CI gates are implemented and green, but the phase is
+**not production-complete**: its "selected parser strategy from ADR-001" deliverable
+still depends on evidence that does not exist yet. Per
+`docs/decisions/ADR-002-ingestion-parser-strategy.md` the strategy is configuration,
+the baseline can never be silently promoted to production, and every run made while
+ADR-001 is open is recorded as `degraded` and flagged for user review.
+
+### Phase 1 is still incomplete
 
 Status: `IN_PROGRESS`
 
@@ -12,13 +27,11 @@ Exact `/goal`:
 
 > Choose the document parsing foundation using evidence from Vietnamese administrative/legal PDF fixtures, not assumptions.
 
-Phase 1 is **not complete**. Every deliverable, test and CI gate is implemented and
-green, but the exit criteria require benchmark evidence from at least 30 representative
-real Vietnamese administrative documents. That corpus is private and is not in this
-repository, so `docs/decisions/ADR-001-parser-selection.md` is committed with status
-`PENDING EVIDENCE` and names no production parser.
-
-Phase 2 stays blocked until that ADR is decided.
+Every Phase 1 deliverable, test and CI gate is implemented and green, but the exit
+criteria require benchmark evidence from at least 30 representative real Vietnamese
+administrative documents. That corpus is private and is not in this repository, so
+`docs/decisions/ADR-001-parser-selection.md` stays `PENDING EVIDENCE` and names no
+production parser. Running the private benchmark is what closes both phases.
 
 ## Phase table
 
@@ -26,7 +39,7 @@ Phase 2 stays blocked until that ADR is decided.
 |---|---|---|---|
 | 0 | Repository and deterministic development foundation | COMPLETE | `941a5c4`; CI run `31787161450` |
 | 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Harness, adapters, router, CanonicalDocument v1 and CI gates complete; ADR-001 `PENDING EVIDENCE` |
-| 2 | Production ingestion and Vietnamese administrative structure | BLOCKED_BY_PHASE_1 | — |
+| 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Ingestion pipeline, APIs, schema, admin parser and Phase 2 CI gates complete; production parser strategy still blocked on ADR-001 |
 | 3 | Document archive and verification-first web UX | BLOCKED_BY_PHASE_2 | — |
 | 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
@@ -130,3 +143,54 @@ Do not use this file for speculative progress or future plans; those belong in `
 Run the benchmark locally against the private corpus with the heavy providers
 installed, commit only the derived `summary.json` / `summary.md`, then rewrite the
 ADR-001 Decision section and set it to `ACCEPTED`.
+
+### Phase 2 progress — 2026-08-17
+
+- Commit/PR: pending (working tree).
+- Test commands: `make ingestion-integration`; `make admin-parser-golden-tests`;
+  `make db-migration-test`; `make backend-format-check`; `make backend-lint`;
+  `make backend-typecheck`; `make backend-test`; `make parser-contract-tests`;
+  `make parser-benchmark-smoke`; `make docs-check`; `make repository-hygiene`;
+  `make secret-scan`; `make compose-config`.
+- CI status: `ingestion-integration`, `admin-parser-golden-tests` and
+  `db-migration-test` jobs added to `.github/workflows/ci.yml`; the migration job runs
+  against the PostgreSQL service, the rest are CPU-only with no private data.
+- ADR/benchmark artifacts: `docs/decisions/ADR-002-ingestion-parser-strategy.md`
+  (ACCEPTED); golden administrative fixtures in `tests/fixtures/admin/`.
+
+#### Delivered
+
+- Upload API with PDF/MIME, size, malformed and encrypted validation, content-addressed
+  write-once original storage, and durable bytes before any job exists.
+- `documents` / `jobs` / `parse_runs` tables and migration `0002_phase2_ingestion`,
+  applied from empty and rolled back in tests on both SQLite and PostgreSQL.
+- Document and job state machines with every legal transition tested and every illegal
+  one rejected; worker availability is never encoded in document status.
+- Job leases with expiry requeue, idempotency keys, bounded retries with backoff, and
+  reprocess that adds a new parse-run version while keeping every earlier run intact.
+- Configurable parser strategy (ADR-002): route to capability to parser, baseline
+  usable only for development/CI, production refuses to parse while ADR-001 is open.
+- Vietnamese administrative parser: `Chương/Mục/Điều/Khoản/Điểm`, `Phụ lục`, numbered,
+  lettered and bulleted lists, `Nơi nhận`, title blocks, signature blocks and
+  pipe-delimited tables preserved without ordering corruption.
+- Critical fields (`Số`, document type, issuer, issue date, title, signer, deadline)
+  with normalized values, confidence, review status and page/block provenance.
+- APIs: upload, list, detail, status, canonical (current or a specific version),
+  original file, page preview and reprocess, all on the documented error envelope.
+
+#### Blocking the phase exit
+
+- **The parser strategy is still undecided.** ADR-001 has no evidence, so every parse
+  run in this repository uses the PyMuPDF baseline, is marked `degraded` and
+  `strategy_decided = false`, and flags the document for user review. Structure and
+  table extraction are consequently as weak as ADR-001 measured them.
+- Phase 2's exit criterion — deterministic canonical output *that can be trusted* —
+  is met mechanically but not evidentially until a real parser is selected.
+
+#### To close Phase 2
+
+1. Close Phase 1 by running the private benchmark and setting ADR-001 to `ACCEPTED`.
+2. Write the resulting route table to a parser strategy JSON file, set
+   `decided: true`, and point `PARSER_STRATEGY_PATH` at it.
+3. Re-run `make check`, confirm parse runs report `degraded = false`, and record the
+   exit evidence here.
