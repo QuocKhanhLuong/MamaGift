@@ -75,4 +75,18 @@ The Phase 0 repository foundation is documented in [`docs/SETUP.md`](docs/SETUP.
 
 ## Development status
 
-Phase 0 foundation complete. Document intelligence phases remain blocked until their own goals and exit criteria are implemented.
+Phase 0 foundation complete.
+
+Phase 1 is **in progress**. The parser benchmark harness is complete and tested: a
+provider-neutral `DocumentParser` interface, adapters for all five candidates, a PDF
+inspection/router, `CanonicalDocument` v1 normalization, and a benchmark CLI that
+measures reading order, heading hierarchy, list preservation, table structure,
+header/footer leakage, provenance and critical fields alongside CER.
+
+The parser decision itself is **not made**. `docs/decisions/ADR-001-parser-selection.md`
+is committed with status `PENDING EVIDENCE` because the required corpus of 30+ real
+Vietnamese administrative documents is private and cannot live in this repository. See
+[`benchmarks/parser/README.md`](benchmarks/parser/README.md) for how to run the
+benchmark against a private corpus.
+
+Phase 2 remains blocked until ADR-001 is decided.

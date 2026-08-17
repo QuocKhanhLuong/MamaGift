@@ -4,20 +4,28 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
-**Phase 0 — Repository and deterministic development foundation**
+**Phase 1 — PDF parser benchmark and parser decision**
 
-Status: `COMPLETE`
+Status: `IN_PROGRESS`
 
 Exact `/goal`:
 
-> Make MamaGift reproducibly buildable and testable on a fresh machine before implementing document intelligence.
+> Choose the document parsing foundation using evidence from Vietnamese administrative/legal PDF fixtures, not assumptions.
+
+Phase 1 is **not complete**. Every deliverable, test and CI gate is implemented and
+green, but the exit criteria require benchmark evidence from at least 30 representative
+real Vietnamese administrative documents. That corpus is private and is not in this
+repository, so `docs/decisions/ADR-001-parser-selection.md` is committed with status
+`PENDING EVIDENCE` and names no production parser.
+
+Phase 2 stays blocked until that ADR is decided.
 
 ## Phase table
 
 | Phase | Name | Status | Exit evidence |
 |---|---|---|---|
 | 0 | Repository and deterministic development foundation | COMPLETE | `941a5c4`; CI run `31787161450` |
-| 1 | PDF parser benchmark and parser decision | NOT_STARTED | — |
+| 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Harness, adapters, router, CanonicalDocument v1 and CI gates complete; ADR-001 `PENDING EVIDENCE` |
 | 2 | Production ingestion and Vietnamese administrative structure | BLOCKED_BY_PHASE_1 | — |
 | 3 | Document archive and verification-first web UX | BLOCKED_BY_PHASE_2 | — |
 | 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
@@ -77,3 +85,48 @@ Do not use this file for speculative progress or future plans; those belong in `
 - CI status: PASS — GitHub Actions run `31787161450` passed `docs-check`, `repository-hygiene`, `secret-scan`, backend lint/typecheck, PostgreSQL-backed backend tests, frontend checks/build, and Compose validation.
 - ADR/benchmark artifacts: `docs/decisions/ADR-0001-phase0-stack.md`; documented repository placeholders only, with no parser benchmark implementation.
 - Known limitations carried forward: Phase 0 intentionally has no document ingestion, OCR, parser, RAG, real LLM, or product UI. The local Docker daemon was unavailable during validation; the remote CI PostgreSQL service and Compose configuration checks passed.
+
+### Phase 1 progress — 2026-08-16
+
+- Commit/PR: pending (working tree).
+- Test commands: `make parser-contract-tests`; `make parser-benchmark-smoke`;
+  `make backend-format-check`; `make backend-lint`; `make backend-typecheck`;
+  `make backend-test`; `make docs-check`; `make repository-hygiene`; `make secret-scan`.
+- CI status: `parser-contract-tests` and `parser-benchmark-smoke` jobs added to
+  `.github/workflows/ci.yml`; the manual heavy benchmark lives in
+  `.github/workflows/parser-benchmark.yml`.
+- ADR/benchmark artifacts: `docs/decisions/ADR-001-parser-selection.md`
+  (status `PENDING EVIDENCE`); eight synthetic fixtures with authored ground truth in
+  `benchmarks/parser/`.
+
+#### Delivered
+
+- Provider-neutral `DocumentParser` interface with a shared structured error schema.
+- Adapters for PyMuPDF (real, CI-executed), MinerU, Marker, Docling and
+  PaddleOCR/PP-StructureV3 (implemented, contract-tested via recorded output, never
+  executed against a real provider).
+- PDF inspection/router covering good text layer, scanned, garbled text layer, mixed,
+  rotated pages and encrypted/unsupported input; 8 of 8 fixtures routed correctly.
+- `CanonicalDocument` v1 normalization with page/block provenance and deterministic
+  block IDs.
+- Benchmark manifest format, CLI, metrics beyond CER, weighted scoring with hard gates,
+  and report generation.
+- 148 passing tests across router, adapter contracts, canonical schema, metrics,
+  harness and an end-to-end lightweight smoke path.
+
+#### Blocking the phase exit
+
+- **No real Vietnamese corpus is available in this repository.** Fewer than 30
+  documents have been evaluated, and only synthetic ones. Exit criterion
+  "at least 30 representative real PDFs have been evaluated" is unmet.
+- **No heavy parser has ever been executed.** MinerU, Marker, Docling and
+  PP-StructureV3 have zero measured results; their adapters are unverified against a
+  real provider install.
+- Consequently no winning parser strategy exists to check against the hard
+  provenance/reading-order requirements.
+
+#### To close Phase 1
+
+Run the benchmark locally against the private corpus with the heavy providers
+installed, commit only the derived `summary.json` / `summary.md`, then rewrite the
+ADR-001 Decision section and set it to `ACCEPTED`.

@@ -1,0 +1,59 @@
+name: parser-benchmark
+
+# Manual/release workflow. Mandatory PR CI never runs heavyweight parsers
+# (`docs/06_CICD.md` section 5).
+on:
+  workflow_dispatch:
+    inputs:
+      parsers:
+        description: "Comma-separated adapters to run (heavy ones need extra install steps)"
+        default: "pymupdf"
+      manifest:
+        description: "Manifest path"
+        default: "benchmarks/parser/manifest.jsonl"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Report adapter availability
+        env:
+          PYTHONPATH: packages/contracts/python:packages/docpipe/python
+        run: uv run python -m tools.parser_bench health
+
+      - name: Run benchmark
+        env:
+          PYTHONPATH: packages/contracts/python:packages/docpipe/python
+        run: |
+          uv run python -m tools.parser_bench run \
+            --manifest "${{ inputs.manifest }}" \
+            --parsers "${{ inputs.parsers }}" \
+            --output "artifacts/parser-bench/${{ github.run_id }}"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-bench-${{ github.run_id }}
+          path: artifacts/parser-bench/
+          retention-days: 30

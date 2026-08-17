@@ -17,6 +17,10 @@ apps/web/dist/
 
 *.db
 infra/compose/postgres-data/
+
+# Benchmark run output; only curated summaries are ever committed.
+artifacts/
+benchmarks/parser/recordings/
 .DS_Store
 
 .agenteam/runs/

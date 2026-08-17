@@ -78,10 +78,10 @@ jobs:
         run: uv sync --locked
 
       - name: Python format check
-        run: uv run ruff format --check services/api services/ai-worker packages/contracts tools
+        run: uv run ruff format --check services/api services/ai-worker packages tools tests benchmarks
 
       - name: Python lint
-        run: uv run ruff check services/api services/ai-worker packages/contracts tools
+        run: uv run ruff check services/api services/ai-worker packages tools tests benchmarks
 
       - name: Python typecheck
         run: uv run mypy
@@ -165,3 +165,71 @@ jobs:
 
       - name: Validate Compose configuration
         run: docker compose -f infra/compose/docker-compose.yml config --quiet
+
+  parser-contract-tests:
+    name: parser-contract-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # No GPU, no model weights, no private documents: heavy parsers take part
+      # through recorded provider output.
+      - name: Router, canonical schema and adapter contract tests
+        run: uv run pytest tests/unit tests/contract -q
+
+  parser-benchmark-smoke:
+    name: parser-benchmark-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Validate the benchmark manifest
+        env:
+          PYTHONPATH: packages/contracts/python:packages/docpipe/python
+        run: uv run python -m tools.parser_bench validate --manifest benchmarks/parser/manifest.jsonl
+
+      - name: Benchmark harness smoke run on synthetic fixtures
+        run: uv run pytest tests/benchmark -q
+
+      - name: Lightweight benchmark run
+        env:
+          PYTHONPATH: packages/contracts/python:packages/docpipe/python
+        run: |
+          uv run python -m tools.parser_bench run \
+            --manifest benchmarks/parser/manifest.jsonl \
+            --parsers pymupdf \
+            --output artifacts/parser-bench/ci-${{ github.run_id }}
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-bench-smoke
+          path: artifacts/parser-bench/
+          retention-days: 7
