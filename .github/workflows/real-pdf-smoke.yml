@@ -1,0 +1,203 @@
+name: real-pdf-smoke
+
+on:
+  push:
+    branches:
+      - eval/real-pdf-batch-01
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: real-pdf-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: services/api:packages/contracts/python:packages/docpipe/python
+      APP_ENV: test
+      DATABASE_URL: sqlite:////tmp/mamagift-real/mamagift.db
+      STORAGE_ROOT: /tmp/mamagift-real/storage
+      MAX_UPLOAD_BYTES: "52428800"
+      CORS_ORIGINS: http://127.0.0.1:5173
+
+    steps:
+      - name: Checkout eval branch
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Download public official PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mamagift-real/docs artifacts/real-pdf-smoke
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/41-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/5/41-bgddt.pdf
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/38-2026-QD-TTg.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/7/38_2026_qd-ttg_23072026-signed.signed.pdf
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/19-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/19-bgddt.pdf
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/13-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/3/13-bgddt.pdf
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/47-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/6/47-bgddt.pdf
+          curl -fL --retry 3 --retry-delay 2 -o /tmp/mamagift-real/docs/22-2026-TT-BGDDT.pdf \
+            https://datafiles.chinhphu.vn/cpp/files/vbpq/2026/4/22-bgddt.pdf
+          ls -lh /tmp/mamagift-real/docs
+
+      - name: Inspect router signals on real PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+          from mamagift_docpipe import inspect_pdf
+
+          rows = []
+          for path in sorted(Path('/tmp/mamagift-real/docs').glob('*.pdf')):
+              report = inspect_pdf(path, document_id=path.stem)
+              rows.append({
+                  'file': path.name,
+                  'route': report.route.value,
+                  'route_confidence': report.route_confidence,
+                  'page_count': report.page_count,
+                  'signals': report.signals,
+                  'warnings': report.warnings,
+                  'sampled_pages': [
+                      {
+                          'page_number': page.page_number,
+                          'classification': page.classification.value,
+                          'char_count': page.char_count,
+                          'image_count': page.image_count,
+                          'image_area_ratio': page.image_area_ratio,
+                          'garbled_char_ratio': page.garbled_char_ratio,
+                      }
+                      for page in report.pages
+                  ],
+              })
+          out = Path('artifacts/real-pdf-smoke/router-inventory.json')
+          out.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(out.read_text(encoding='utf-8'))
+          PY
+
+      - name: Prepare Phase 2 API database
+        run: uv run alembic -c services/api/alembic.ini upgrade head
+
+      - name: Start API
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run uvicorn app.main:app --app-dir services/api --host 127.0.0.1 --port 8124 \
+            > artifacts/real-pdf-smoke/api.log 2>&1 &
+          echo $! > /tmp/mamagift-real/api.pid
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8124/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat artifacts/real-pdf-smoke/api.log
+          exit 1
+
+      - name: Run real ingestion smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > artifacts/real-pdf-smoke/ingestion.jsonl
+
+          for pdf in /tmp/mamagift-real/docs/*.pdf; do
+            name=$(basename "$pdf")
+            upload_body=$(mktemp)
+            upload_code=$(curl -sS -o "$upload_body" -w '%{http_code}' \
+              -F "file=@${pdf};type=application/pdf" \
+              http://127.0.0.1:8124/api/v1/documents)
+
+            if [[ "$upload_code" != "202" && "$upload_code" != "200" ]]; then
+              jq -n --arg file "$name" --arg code "$upload_code" --slurpfile body "$upload_body" \
+                '{file:$file, upload_http:($code|tonumber), upload_error:$body[0]}' \
+                >> artifacts/real-pdf-smoke/ingestion.jsonl
+              continue
+            fi
+
+            document_id=$(jq -r '.document.id' "$upload_body")
+            uv run python -m app.worker --once > /tmp/mamagift-real/worker-${document_id}.log 2>&1 || true
+
+            detail_path=$(mktemp)
+            detail_code=$(curl -sS -o "$detail_path" -w '%{http_code}' \
+              "http://127.0.0.1:8124/api/v1/documents/${document_id}")
+            status=$(jq -r '.document.status // "UNKNOWN"' "$detail_path")
+
+            canonical_path=$(mktemp)
+            canonical_code=$(curl -sS -o "$canonical_path" -w '%{http_code}' \
+              "http://127.0.0.1:8124/api/v1/documents/${document_id}/canonical")
+
+            if [[ "$canonical_code" == "200" ]]; then
+              jq -n \
+                --arg file "$name" \
+                --arg document_id "$document_id" \
+                --arg status "$status" \
+                --slurpfile c "$canonical_path" \
+                '{
+                  file:$file,
+                  document_id:$document_id,
+                  status:$status,
+                  route:$c[0].parse_run.route,
+                  parser:$c[0].parse_run.parser_name,
+                  strategy_decided:$c[0].parse_run.strategy_decided,
+                  degraded:$c[0].parse_run.degraded,
+                  page_count:($c[0].canonical.pages|length),
+                  block_count:([$c[0].canonical.pages[].blocks[]]|length),
+                  text_chars:([$c[0].canonical.pages[].blocks[].text // ""]|join("")|length),
+                  requires_user_review:$c[0].canonical.quality_report.requires_user_review,
+                  critical_warnings:$c[0].canonical.quality_report.critical_field_warnings,
+                  fields:[$c[0].canonical.extracted_fields[]? | {
+                    name,
+                    normalized_value,
+                    confidence,
+                    review_status,
+                    source_page_numbers,
+                    source_block_ids
+                  }]
+                }' >> artifacts/real-pdf-smoke/ingestion.jsonl
+            else
+              jq -n \
+                --arg file "$name" \
+                --arg document_id "$document_id" \
+                --arg status "$status" \
+                --arg canonical_http "$canonical_code" \
+                --slurpfile detail "$detail_path" \
+                --slurpfile canonical "$canonical_path" \
+                '{
+                  file:$file,
+                  document_id:$document_id,
+                  status:$status,
+                  canonical_http:($canonical_http|tonumber),
+                  document:$detail[0].document,
+                  canonical_error:$canonical[0]
+                }' >> artifacts/real-pdf-smoke/ingestion.jsonl
+            fi
+          done
+
+          echo '=== ingestion summary ==='
+          cat artifacts/real-pdf-smoke/ingestion.jsonl
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-pdf-smoke-${{ github.run_id }}
+          path: artifacts/real-pdf-smoke/
+          retention-days: 14
