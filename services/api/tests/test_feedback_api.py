@@ -330,6 +330,51 @@ def test_critical_correction_rejects_stale_field_id_after_reprocess(
     assert _feedback_count(session, document_id) == before_count == 0
 
 
+def test_critical_correction_rejects_when_current_parse_run_is_unavailable(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths,
+) -> None:
+    document_id, field = _process_document_with_deadline(
+        client, upload, session, storage, settings, fixture_paths
+    )
+    document = session.get(Document, document_id)
+    assert document is not None
+    assert document.current_parse_run_id is not None
+
+    # Keep the field ID valid for the processed run, then make the current pointer
+    # unavailable without changing the production schema or parser behavior.
+    document.current_parse_run_id = None
+    session.commit()
+
+    request_id = "req_feedback_no_current_parse_run"
+    before_count = _feedback_count(session, document_id)
+    response = client.post(
+        f"/api/v1/documents/{document_id}/feedback",
+        headers={"X-Request-ID": request_id},
+        json={
+            "feedback_type": "critical_field_correction",
+            "field_id": field["id"],
+            "corrected_value": "2026-08-25",
+        },
+    )
+
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == "conflict"
+    assert error["retryable"] is False
+    assert error["request_id"] == request_id
+    assert error["details"] == {
+        "document_id": document_id,
+        "current_parse_run_id": None,
+        "reason": "current_canonical_unavailable",
+    }
+    assert _feedback_count(session, document_id) == before_count == 0
+
+
 def test_feedback_for_an_unknown_document_is_a_structured_404(client: TestClient) -> None:
     response = client.post(
         "/api/v1/documents/doc_missing/feedback",

@@ -8,7 +8,15 @@ const FIXTURE_PDF = path.resolve(
   "../../../benchmarks/parser/fixtures/quyet_dinh_dieu_khoan.pdf",
 );
 
-const INTERACTIVE_ROLES = ["button", "link", "tab", "textbox", "combobox", "menuitem"] as const;
+const INTERACTIVE_ROLES = [
+  "button",
+  "link",
+  "tab",
+  "textbox",
+  "combobox",
+  "menuitem",
+  "searchbox",
+] as const;
 
 async function assertNoInteractiveAssistantControls(page: Page) {
   for (const role of INTERACTIVE_ROLES) {
