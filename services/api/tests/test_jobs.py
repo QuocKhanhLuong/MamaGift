@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app import ingestion
 from app.models import Document, Job, ParseRun
@@ -71,6 +72,119 @@ def test_expired_lease_is_requeued(
     assert requeued is not None
     assert requeued.id == leased.id
     assert requeued.leased_by == "worker-b"
+
+
+def test_two_workers_cannot_lease_the_same_job(
+    session: Session,
+    session_factory: sessionmaker[Session],
+    storage: LocalObjectStorage,
+    settings: Settings,
+    pdf_bytes: bytes,
+) -> None:
+    """Both workers pick the same queued row; only the compare-and-swap winner keeps it."""
+    _upload_document(session, storage, settings, pdf_bytes)
+    moment = datetime.now(UTC)
+
+    with session_factory() as first, session_factory() as second:
+        job_a = first.scalar(ingestion._runnable_job_query(first, moment))
+        job_b = second.scalar(ingestion._runnable_job_query(second, moment))
+        assert job_a is not None and job_b is not None
+        assert job_a.id == job_b.id
+        job_id = job_a.id
+
+        assert ingestion._claim_job(first, job_a, "worker-a", moment, settings) is True
+        first.commit()
+
+        assert ingestion._claim_job(second, job_b, "worker-b", moment, settings) is False
+        second.commit()
+
+    with session_factory() as check:
+        job = check.get(Job, job_id)
+        assert job is not None
+        assert job.status == JobStatus.LEASED.value
+        assert job.leased_by == "worker-a"
+
+
+def test_a_stale_running_job_is_requeued(
+    session: Session, storage: LocalObjectStorage, settings: Settings, pdf_bytes: bytes
+) -> None:
+    """A worker that dies mid-parse must not strand the job in RUNNING."""
+    document = _upload_document(session, storage, settings, pdf_bytes)
+
+    job = ingestion.lease_next_job(session, "worker-a", settings)
+    assert job is not None
+    ingestion.set_job_status(job, JobStatus.RUNNING)
+    ingestion.set_document_status(document, DocumentStatus.INSPECTING)
+    job.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    session.commit()
+
+    assert ingestion.release_expired_leases(session) == 1
+    assert job.status == JobStatus.QUEUED.value
+    assert job.leased_by is None
+    assert document.status == DocumentStatus.QUEUED_FOR_PARSE.value
+
+    requeued = ingestion.lease_next_job(session, "worker-b", settings)
+    assert requeued is not None
+    assert requeued.id == job.id
+
+
+def test_reprocess_after_a_terminal_failure_creates_a_runnable_job(
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    pdf_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dead job's idempotency key must not swallow the reprocess request."""
+    document = _upload_document(session, storage, settings, pdf_bytes)
+
+    failing = {"enabled": True}
+    real_run_ingestion = ingestion.run_ingestion
+
+    def fail_while_enabled(*args: object, **kwargs: object):
+        if failing["enabled"]:
+            raise ParserError(ParserErrorCode.NORMALIZATION_FAILURE, "unusable", parser_name="test")
+        return real_run_ingestion(*args, **kwargs)
+
+    monkeypatch.setattr(ingestion, "run_ingestion", fail_while_enabled)
+    assert process_next_job(session, storage, settings, "worker-a") is None
+
+    dead = ingestion.latest_job(session, document.id)
+    assert dead is not None
+    assert dead.status == JobStatus.FAILED_TERMINAL.value
+
+    failing["enabled"] = False
+    fresh = ingestion.reprocess_document(session, document, settings)
+    assert fresh.id != dead.id
+    assert fresh.status == JobStatus.QUEUED.value
+
+    assert process_next_job(session, storage, settings, "worker-a") is not None
+    session.refresh(document)
+    assert document.status == DocumentStatus.READY_FOR_REVIEW.value
+
+
+def test_a_broken_strategy_file_fails_the_job_not_the_worker(
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    pdf_bytes: bytes,
+    tmp_path: Path,
+) -> None:
+    broken = tmp_path / "strategy.json"
+    broken.write_text("{ this is not json", encoding="utf-8")
+    broken_settings = settings.model_copy(update={"parser_strategy_path": str(broken)})
+
+    document = _upload_document(session, storage, broken_settings, pdf_bytes)
+    assert process_next_job(session, storage, broken_settings, "worker-a") is None
+
+    job = ingestion.latest_job(session, document.id)
+    assert job is not None
+    assert job.status == JobStatus.FAILED_TERMINAL.value
+    assert job.error is not None
+    assert job.error["code"] == "parser_strategy_undecided"
+
+    session.refresh(document)
+    assert document.status == DocumentStatus.PARSE_FAILED.value
 
 
 def test_parser_error_is_recorded_as_a_terminal_failure(

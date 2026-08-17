@@ -137,3 +137,27 @@ class ParseRun(Base):
     )
 
     document: Mapped[Document] = relationship(back_populates="parse_runs")
+
+
+class FeedbackEvent(Base):
+    """An append-only correction event (`docs/08_API_AND_DATA_CONTRACTS.md` section 13).
+
+    Feedback never rewrites `parse_runs.canonical`; the raw prediction stays exactly
+    as parsed, and a corrected value is layered on top when the canonical document is
+    served (`docs/09_CODEX_EXECUTION.md` section 8).
+    """
+
+    __tablename__ = "feedback_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    feedback_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    corrected_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

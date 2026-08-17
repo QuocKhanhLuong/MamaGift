@@ -79,8 +79,15 @@ DOCUMENT_TRANSITIONS: dict[DocumentStatus, frozenset[DocumentStatus]] = {
 JOB_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
     JobStatus.QUEUED: frozenset({JobStatus.LEASED}),
     JobStatus.LEASED: frozenset({JobStatus.RUNNING, JobStatus.QUEUED}),
+    # QUEUED is reachable from RUNNING so an expired lease can requeue a job whose
+    # worker died mid-parse; nothing else ever moves a RUNNING job.
     JobStatus.RUNNING: frozenset(
-        {JobStatus.SUCCEEDED, JobStatus.FAILED_RETRYABLE, JobStatus.FAILED_TERMINAL}
+        {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED_RETRYABLE,
+            JobStatus.FAILED_TERMINAL,
+            JobStatus.QUEUED,
+        }
     ),
     JobStatus.FAILED_RETRYABLE: frozenset({JobStatus.QUEUED, JobStatus.FAILED_TERMINAL}),
     JobStatus.SUCCEEDED: frozenset(),

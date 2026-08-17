@@ -7,16 +7,18 @@ run, never something the client has to understand
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from mamagift_docpipe import ParserError, render_page_png
 
 from .. import errors, ingestion
+from .. import feedback as feedback_service
 from ..db import get_session
 from ..dependencies import get_storage
 from ..models import Document, ParseRun
@@ -40,6 +42,31 @@ SessionDep = Annotated[Session, Depends(get_session)]
 StorageDep = Annotated[ObjectStorage, Depends(get_storage)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+async def _read_bounded(file: UploadFile, limit: int) -> bytes:
+    """Read the upload in chunks, refusing it as soon as it passes the size limit.
+
+    The body is attacker-controlled, so it must never be materialised in full before
+    the limit is checked.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > limit:
+            raise errors.ApiError(
+                errors.FILE_TOO_LARGE,
+                f"file exceeds the {limit} byte limit",
+                status_code=413,
+                details={"byte_size": total, "limit": limit},
+            )
+        chunks.append(chunk)
+
 
 def _load_document(session: Session, document_id: str) -> Document:
     document = session.get(Document, document_id)
@@ -62,7 +89,7 @@ async def upload_document(
     file: Annotated[UploadFile, File(description="The original PDF")],
 ) -> UploadResponse:
     """Store the original bytes immutably and queue a parse job."""
-    data = await file.read()
+    data = await _read_bounded(file, settings.max_upload_bytes)
     result = ingestion.create_document(
         session,
         storage,
@@ -85,10 +112,38 @@ async def upload_document(
 def list_documents(
     session: SessionDep,
     status: Annotated[str | None, Query(description="Filter by document status")] = None,
+    query: Annotated[str | None, Query(description="Substring match on title/number/filename")] = (
+        None
+    ),
+    type: Annotated[str | None, Query(description="Exact match on document_type")] = None,
+    issuer: Annotated[str | None, Query(description="Substring match on issuer")] = None,
+    from_: Annotated[
+        date | None, Query(alias="from", description="issued_date lower bound")
+    ] = None,
+    to: Annotated[date | None, Query(description="issued_date upper bound")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> DocumentListResponse:
-    filters = [Document.status == status] if status else []
+    filters = []
+    if status:
+        filters.append(Document.status == status)
+    if query:
+        pattern = f"%{query}%"
+        filters.append(
+            or_(
+                Document.title.ilike(pattern),
+                Document.document_number.ilike(pattern),
+                Document.filename.ilike(pattern),
+            )
+        )
+    if type:
+        filters.append(Document.document_type == type)
+    if issuer:
+        filters.append(Document.issuer.ilike(f"%{issuer}%"))
+    if from_:
+        filters.append(Document.issued_date >= from_)
+    if to:
+        filters.append(Document.issued_date <= to)
 
     total = session.scalar(select(func.count()).select_from(Document).where(*filters)) or 0
     rows = session.scalars(
@@ -163,7 +218,9 @@ def get_canonical(
             details={"document_id": document_id, "status": document.status},
         )
 
-    canonical: dict[str, Any] = run.canonical
+    canonical: dict[str, Any] = feedback_service.apply_corrections(
+        session, document.id, run.canonical
+    )
     return CanonicalResponse(parse_run=ParseRunSummary.from_model(run), canonical=canonical)
 
 

@@ -11,14 +11,16 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import CursorResult, Select, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from mamagift_docpipe import (
     CanonicalDocument,
     ParserError,
     ParserErrorCode,
+    ParserStrategy,
     load_strategy,
     run_ingestion,
     validate_pdf_bytes,
@@ -28,6 +30,7 @@ from . import errors
 from .models import Document, Job, ParseRun
 from .settings import Settings
 from .state_machine import (
+    TERMINAL_JOB_STATUSES,
     DocumentStatus,
     JobStatus,
     assert_document_transition,
@@ -214,14 +217,24 @@ def enqueue_parse_job(
 
     The idempotency key is derived from the document and the parse-run version the job
     would produce, so re-queueing for the same target version returns the same job
-    instead of creating a duplicate.
+    instead of creating a duplicate. A job that already reached a terminal state is
+    never handed back: it can no longer run, so reusing it would turn `/reprocess`
+    into a silent no-op. The key then carries a generation ordinal, which keeps
+    `uq_jobs_idempotency_key` satisfied without deleting the failed job's history.
     """
     target_version = next_parse_run_version(session, document.id)
-    idempotency_key = f"{document.id}:{PARSE_JOB_KIND}:v{target_version}"
+    base_key = f"{document.id}:{PARSE_JOB_KIND}:v{target_version}"
 
-    existing = session.scalar(select(Job).where(Job.idempotency_key == idempotency_key))
-    if existing is not None:
-        return existing
+    idempotency_key = base_key
+    generation = 0
+    while True:
+        existing = session.scalar(select(Job).where(Job.idempotency_key == idempotency_key))
+        if existing is None:
+            break
+        if JobStatus(existing.status) not in TERMINAL_JOB_STATUSES:
+            return existing
+        generation += 1
+        idempotency_key = f"{base_key}#{generation}"
 
     job = Job(
         id=new_id("job"),
@@ -253,12 +266,20 @@ def latest_job(session: Session, document_id: str) -> Job | None:
     )
 
 
+EXPIRABLE_JOB_STATUSES = (JobStatus.LEASED.value, JobStatus.RUNNING.value)
+
+
 def release_expired_leases(session: Session, now: datetime | None = None) -> int:
-    """Requeue jobs whose lease expired; a dead worker must not strand a document."""
+    """Requeue jobs whose lease expired; a dead worker must not strand a document.
+
+    RUNNING is swept as well as LEASED: only the worker holding the job ever moves it
+    out of RUNNING, so a worker that dies mid-parse would otherwise strand the job (and
+    its document) forever.
+    """
     moment = now or _now()
-    leased = session.scalars(select(Job).where(Job.status == JobStatus.LEASED.value)).all()
+    stale = session.scalars(select(Job).where(Job.status.in_(EXPIRABLE_JOB_STATUSES))).all()
     requeued = 0
-    for job in leased:
+    for job in stale:
         expires_at = _aware(job.lease_expires_at)
         if expires_at is not None and expires_at > moment:
             continue
@@ -266,10 +287,61 @@ def release_expired_leases(session: Session, now: datetime | None = None) -> int
         job.leased_by = None
         job.lease_expires_at = None
         job.available_at = moment
+        document = session.get(Document, job.document_id)
+        if document is not None:
+            # A RUNNING job left the document mid-pipeline; the retry restarts from
+            # the queue, so the document has to follow it back.
+            set_document_status(document, DocumentStatus.QUEUED_FOR_PARSE)
         requeued += 1
     if requeued:
         session.flush()
     return requeued
+
+
+def _runnable_job_query(session: Session, moment: datetime) -> Select[tuple[Job]]:
+    stmt = (
+        select(Job)
+        .where(
+            Job.status == JobStatus.QUEUED.value,
+            or_(Job.available_at.is_(None), Job.available_at <= moment),
+        )
+        .order_by(Job.created_at.asc(), Job.id.asc())
+        .limit(1)
+    )
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite has neither row locks nor SKIP LOCKED; the compare-and-swap below is
+        # what actually makes the claim safe, so the plain SELECT is fine here.
+        return stmt
+    return stmt.with_for_update(skip_locked=True)
+
+
+def _claim_job(
+    session: Session,
+    job: Job,
+    worker_id: str,
+    moment: datetime,
+    settings: Settings,
+) -> bool:
+    """Compare-and-swap the lease onto a job; False means another worker won the race.
+
+    The `status == QUEUED` predicate is the guard: without it a PK-only UPDATE would
+    let two workers lease the same job and collide on `uq_parse_runs_version` later.
+    """
+    result = cast(
+        "CursorResult[Any]",
+        session.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == JobStatus.QUEUED.value)
+            .values(
+                status=JobStatus.LEASED.value,
+                leased_by=worker_id,
+                lease_expires_at=moment + timedelta(seconds=settings.job_lease_seconds),
+                updated_at=_now(),
+            )
+        ),
+    )
+    session.refresh(job)
+    return result.rowcount == 1
 
 
 def lease_next_job(
@@ -282,23 +354,12 @@ def lease_next_job(
     moment = now or _now()
     release_expired_leases(session, moment)
 
-    job = session.scalar(
-        select(Job)
-        .where(
-            Job.status == JobStatus.QUEUED.value,
-            or_(Job.available_at.is_(None), Job.available_at <= moment),
-        )
-        .order_by(Job.created_at.asc(), Job.id.asc())
-        .limit(1)
-    )
-    if job is None:
-        return None
-
-    set_job_status(job, JobStatus.LEASED)
-    job.leased_by = worker_id
-    job.lease_expires_at = moment + timedelta(seconds=settings.job_lease_seconds)
-    session.flush()
-    return job
+    while True:
+        job = session.scalar(_runnable_job_query(session, moment))
+        if job is None:
+            return None
+        if _claim_job(session, job, worker_id, moment, settings):
+            return job
 
 
 # ---------------------------------------------------------------------- execution
@@ -412,6 +473,24 @@ def _fail_job(
     session.commit()
 
 
+def _load_strategy(path: str | None) -> ParserStrategy:
+    """Load the strategy, mapping malformed configuration onto a structured error.
+
+    A broken file must fail the one job, not raise out of the worker loop and
+    crash-loop the process.
+    """
+    try:
+        return load_strategy(path)
+    except ParserError:
+        raise
+    except Exception as exc:
+        raise ParserError(
+            ParserErrorCode.PARSER_STRATEGY_UNDECIDED,
+            f"parser strategy configuration is unusable: {exc}",
+            parser_name="strategy",
+        ) from exc
+
+
 def run_job(
     session: Session,
     job: Job,
@@ -429,9 +508,8 @@ def run_job(
     document.error_message = None
     session.commit()
 
-    strategy = load_strategy(settings.parser_strategy_path)
-
     try:
+        strategy = _load_strategy(settings.parser_strategy_path)
         pdf_path = storage.local_path(document.storage_uri)
         set_document_status(document, DocumentStatus.PARSING)
         session.commit()

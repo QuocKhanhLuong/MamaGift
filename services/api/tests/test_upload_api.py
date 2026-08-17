@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Document, Job
+from app.routers.documents import UPLOAD_CHUNK_BYTES
+from app.settings import Settings
 from app.state_machine import DocumentStatus, JobStatus
 from app.storage import LocalObjectStorage, checksum_of
 
@@ -90,6 +92,20 @@ def test_oversized_upload_is_rejected(upload, client: TestClient, pdf_bytes: byt
     body = response.json()["error"]
     assert body["code"] == "file_too_large"
     assert body["details"]["limit"] == 2 * 1024 * 1024
+
+
+def test_oversized_upload_is_rejected_before_the_body_is_buffered(
+    upload, client: TestClient, pdf_bytes: bytes, session: Session, settings: Settings
+) -> None:
+    """Reading stops just past the limit instead of materialising the whole body."""
+    oversized = pdf_bytes + b"\0" * (settings.max_upload_bytes * 4)
+    response = upload(client, oversized)
+
+    assert response.status_code == 413
+    details = response.json()["error"]["details"]
+    assert details["byte_size"] <= settings.max_upload_bytes + UPLOAD_CHUNK_BYTES
+    assert details["byte_size"] < len(oversized)
+    assert session.scalars(select(Document)).all() == []
 
 
 def test_malformed_pdf_is_rejected(upload, client: TestClient) -> None:

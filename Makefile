@@ -4,6 +4,8 @@ UV_CACHE_DIR ?= $(CURDIR)/.uv-cache
 PYTHONPATH_PARTS = packages/contracts/python:packages/docpipe/python
 UV_RUN = UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run
 BENCH_RUN = PYTHONPATH=$(PYTHONPATH_PARTS) $(UV_RUN)
+# `app.*` lives under services/api and is not an installed package.
+API_RUN = PYTHONPATH=services/api:$(PYTHONPATH_PARTS) $(UV_RUN)
 BENCH_OUTPUT ?= artifacts/parser-bench/local
 BENCH_PARSERS ?= pymupdf
 NPM ?= npm
@@ -13,7 +15,8 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build \
 	compose-config docs-check repository-hygiene secret-scan check dev \
 	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
-	ingestion-integration admin-parser-golden-tests db-migration-test worker
+	ingestion-integration admin-parser-golden-tests db-migration-test worker serve-api \
+	web-component-tests web-e2e-smoke feedback-tests
 
 setup:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --locked
@@ -79,9 +82,23 @@ admin-parser-golden-tests:
 db-migration-test:
 	$(UV_RUN) pytest services/api/tests/test_migrations.py -q
 
+# Phase 3 correction feedback gate.
+feedback-tests:
+	$(UV_RUN) pytest services/api/tests/test_feedback_api.py -q
+
 # Drain the parse queue once against the configured database and storage.
 worker:
-	$(UV_RUN) python -m app.worker --once
+	$(API_RUN) python -m app.worker --once
+
+# Serve the API for local/E2E use.
+serve-api:
+	$(API_RUN) uvicorn app.main:app --host $${API_HOST:-127.0.0.1} --port $${API_PORT:-8000}
+
+web-component-tests:
+	$(NPM) run test:run --prefix apps/web
+
+web-e2e-smoke:
+	$(NPM) run test:e2e --prefix apps/web
 
 compose-config:
 	docker compose -f $(COMPOSE_FILE) config --quiet
@@ -97,8 +114,9 @@ secret-scan:
 
 check: docs-check repository-hygiene secret-scan backend-format-check backend-lint backend-typecheck backend-test \
 	parser-contract-tests parser-benchmark-smoke \
-	ingestion-integration admin-parser-golden-tests db-migration-test \
-	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config
+	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests \
+	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config \
+	web-e2e-smoke
 
 dev:
 	docker compose -f $(COMPOSE_FILE) up --build

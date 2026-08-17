@@ -58,6 +58,27 @@ def test_baseline_may_be_primary_only_when_a_benchmark_promoted_it() -> None:
     assert selection.strategy_decided is True
 
 
+def test_baseline_promotion_guard_survives_a_reconfigured_baseline_parser() -> None:
+    """Pointing `baseline_parser` elsewhere must not launder pymupdf into a primary.
+
+    The guard once compared against the mutable field, so renaming the baseline made
+    `primary: pymupdf` look like an ordinary decided parser: not degraded, not baseline.
+    """
+    with pytest.raises(ValueError, match="baseline_parser must be"):
+        ParserStrategy(
+            decided=True,
+            adr_status="ACCEPTED",
+            baseline_parser="docling",
+            baseline_promoted_by_benchmark=False,
+            routes={
+                "born_digital": RoutePlan(capability="born_digital_text", primary="pymupdf"),
+                "scanned": RoutePlan(capability="ocr", primary="ppstructure"),
+                "mixed": RoutePlan(capability="ocr_and_text", primary="mineru"),
+                "garbled_text_layer": RoutePlan(capability="ocr", primary="ppstructure"),
+            },
+        )
+
+
 def test_decided_strategy_requires_a_primary_for_every_route() -> None:
     with pytest.raises(ValueError, match="lack a primary"):
         ParserStrategy(

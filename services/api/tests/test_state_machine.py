@@ -85,6 +85,12 @@ def test_a_failed_document_can_only_move_back_through_the_queue() -> None:
     )
 
 
+def test_a_running_job_can_be_requeued_after_its_lease_expires() -> None:
+    """A worker that dies mid-parse must not strand the job in RUNNING forever."""
+    assert can_transition_job(JobStatus.RUNNING, JobStatus.QUEUED)
+    assert_job_transition(JobStatus.RUNNING, JobStatus.QUEUED)
+
+
 def test_worker_availability_is_not_a_document_state() -> None:
     """Worker health must never be encoded by corrupting document status."""
     assert not any("WORKER" in status.value for status in DocumentStatus)

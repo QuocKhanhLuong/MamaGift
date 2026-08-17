@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .errors import ApiError, api_error_handler
-from .routers import documents
+from .routers import documents, feedback
 from .settings import get_settings
 
 
@@ -28,6 +28,7 @@ app.add_middleware(
 )
 app.add_exception_handler(ApiError, api_error_handler)
 app.include_router(documents.router)
+app.include_router(feedback.router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])

@@ -33,8 +33,11 @@ BULLET_RE = re.compile(r"^[-–—•*+]\s+(.+)$")
 
 # ------------------------------------------------------------------- header fields
 
-NUMBER_RE = re.compile(r"^SỐ\s*[:.]?\s*([^\s;,]+)", re.IGNORECASE)
-NUMBER_INLINE_RE = re.compile(r"\bSỐ\s*[:.]\s*([^\s;,]+)", re.IGNORECASE)
+# The `\s{0,N}` bounds are load-bearing, not cosmetic: `normalize_text` collapses only
+# ASCII/Unicode space separators, so runs of U+3000 or \x0c reach these patterns intact,
+# and unbounded back-to-back `\s*` around a group that can fail backtracks quadratically.
+NUMBER_RE = re.compile(r"^SỐ\s{0,8}[:.]?\s{0,8}([^\s;,]+)", re.IGNORECASE)
+NUMBER_INLINE_RE = re.compile(r"\bSỐ\s{0,8}[:.]\s{0,8}([^\s;,]+)", re.IGNORECASE)
 SUBJECT_RE = re.compile(r"^(?:V/v|V\.v|Về\s+việc)\s*[:.]?\s*(.+)$", re.IGNORECASE)
 RECIPIENTS_RE = re.compile(r"^NƠI\s*NHẬN\s*[:.]?\s*(.*)$", re.IGNORECASE)
 ADDRESSEE_RE = re.compile(r"^KÍNH\s*GỬI\s*[:.]?\s*(.*)$", re.IGNORECASE)

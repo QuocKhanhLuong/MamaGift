@@ -65,6 +65,8 @@ class ParserStrategy(BaseModel):
     version: str = PARSER_STRATEGY_VERSION
     adr_status: str = "PENDING EVIDENCE"
     decided: bool = False
+    # Present for configuration round-tripping only; it names the fixed BASELINE_PARSER
+    # and may not be reconfigured, or the promotion guard below could be side-stepped.
     baseline_parser: str = BASELINE_PARSER
     # Set only by a benchmark that actually promoted the baseline.
     baseline_promoted_by_benchmark: bool = False
@@ -74,16 +76,19 @@ class ParserStrategy(BaseModel):
 
     @model_validator(mode="after")
     def _validate_strategy(self) -> Self:
-        if self.baseline_parser not in ADAPTER_REGISTRY:
-            raise ValueError(f"unknown baseline parser: {self.baseline_parser}")
+        if self.baseline_parser != BASELINE_PARSER:
+            raise ValueError(
+                f"baseline_parser must be {BASELINE_PARSER!r}, not {self.baseline_parser!r}; "
+                "the baseline is fixed by ADR-001 and cannot be redefined by configuration"
+            )
 
         for route_name, plan in self.routes.items():
             if route_name not in {route.value for route in Route}:
                 raise ValueError(f"unknown route in strategy: {route_name}")
-            if plan.primary == self.baseline_parser and not self.baseline_promoted_by_benchmark:
+            if plan.primary == BASELINE_PARSER and not self.baseline_promoted_by_benchmark:
                 raise ValueError(
                     f"route {route_name!r} names the baseline parser "
-                    f"{self.baseline_parser!r} as primary, but "
+                    f"{BASELINE_PARSER!r} as primary, but "
                     "baseline_promoted_by_benchmark is false; ADR-001 has not promoted it"
                 )
 
@@ -209,9 +214,9 @@ def select_parser(
 
         warnings.append(
             f"parser strategy is undecided for route {route_value!r}; "
-            f"running the {strategy.baseline_parser} baseline for development/CI only"
+            f"running the {BASELINE_PARSER} baseline for development/CI only"
         )
-        selected = strategy.baseline_parser
+        selected = BASELINE_PARSER
         chain = [selected]
         degraded = True
         reason = "baseline_fallback_strategy_undecided"
@@ -233,7 +238,7 @@ def select_parser(
         capability=plan.capability,
         parser_name=selected,
         chain=chain,
-        is_baseline=selected == strategy.baseline_parser,
+        is_baseline=selected == BASELINE_PARSER,
         strategy_decided=strategy.decided,
         degraded=degraded,
         capability_gaps=gaps,

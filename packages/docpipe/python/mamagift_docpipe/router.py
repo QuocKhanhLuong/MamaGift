@@ -34,6 +34,18 @@ GARBLED_CHAR_RATIO = 0.20
 # Fraction of pages that must agree before a whole-document label is confident.
 DOMINANT_PAGE_RATIO = 0.80
 
+# Inspection runs on untrusted uploads, so it samples rather than reads everything: a
+# small crafted PDF can otherwise expand into gigabytes of text and image geometry. The
+# route label is a ratio over pages, so a leading sample of this size is representative.
+MAX_INSPECTED_PAGES = 50
+
+# Per page, only this many characters feed the garbled-ratio and char-count signals.
+# Well above MIN_TEXT_LAYER_CHARS, so classification thresholds are unaffected.
+MAX_PAGE_TEXT_CHARS = 20_000
+
+# Per page, only this many images have their placement rectangles resolved.
+MAX_INSPECTED_IMAGES_PER_PAGE = 200
+
 
 class Route(StrEnum):
     BORN_DIGITAL = "born_digital"
@@ -291,15 +303,16 @@ def inspect_pdf(pdf_path: str | Path, document_id: str | None = None) -> Inspect
             )
 
         pages: list[PageSignals] = []
-        for index in range(document.page_count):
+        inspected_page_count = min(document.page_count, MAX_INSPECTED_PAGES)
+        for index in range(inspected_page_count):
             page = document.load_page(index)
-            text = page.get_text("text")
+            text = page.get_text("text")[:MAX_PAGE_TEXT_CHARS]
             rect = page.rect
             page_area = float(rect.width * rect.height) or 1.0
 
             image_area = 0.0
             image_count = 0
-            for image in page.get_images(full=True):
+            for image in page.get_images(full=True)[:MAX_INSPECTED_IMAGES_PER_PAGE]:
                 image_count += 1
                 for rects in page.get_image_rects(image[0]):
                     image_area += float(rects.width * rects.height)
@@ -327,6 +340,11 @@ def inspect_pdf(pdf_path: str | Path, document_id: str | None = None) -> Inspect
 
         route, confidence, warnings = _route_from_pages(pages)
 
+        if inspected_page_count < document.page_count:
+            warnings.append(
+                f"routing sampled the first {inspected_page_count} of {document.page_count} pages"
+            )
+
         rotated_pages = [page.page_number for page in pages if page.rotation != 0]
         if rotated_pages:
             warnings.append(f"rotated pages detected: {rotated_pages}")
@@ -347,13 +365,14 @@ def inspect_pdf(pdf_path: str | Path, document_id: str | None = None) -> Inspect
             "mean_chars_per_page": sum(p.char_count for p in pages) / total,
             "pages_with_diacritics": sum(p.has_vietnamese_diacritics for p in pages),
             "non_nfc_page_numbers": non_nfc_pages,
+            "inspected_page_count": inspected_page_count,
         }
 
         return InspectionReport(
             document_id=doc_id,
             route=route,
             route_confidence=min(1.0, max(0.0, confidence)),
-            page_count=len(pages),
+            page_count=document.page_count,
             encrypted=bool(document.is_encrypted),
             needs_password=False,
             pages=pages,

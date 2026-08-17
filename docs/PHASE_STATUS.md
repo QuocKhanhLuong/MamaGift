@@ -4,20 +4,36 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
-**Phase 2 — Production ingestion and Vietnamese administrative structure**
+**Phase 3 — Document archive and verification-first web UX**
 
 Status: `IN_PROGRESS`
 
 Exact `/goal`:
 
-> Turn an uploaded PDF into a versioned, reviewable `CanonicalDocument` with trustworthy Vietnamese administrative structure and critical-field provenance.
+> Let a non-technical family user upload, find, inspect, and verify parsed documents without using developer tools.
+
+Phase 3's web flows, component/integration/E2E tests and CI gates are implemented and
+green. The product is demonstrable entirely from the browser, but it inherits Phase
+1/2's open item: every document shown was parsed by the undecided PyMuPDF baseline, so
+the UI correctly displays every field/parse run as `degraded`/`Cần kiểm tra` rather
+than implying a trustworthy production parse. Login is a screen/state handoff only
+(`docs/design/01_INFORMATION_ARCHITECTURE.md` IA-00) with no real authentication
+backend, as no such contract exists yet.
+
+### Phase 2 progress carried forward
 
 Phase 2's deliverables, tests and CI gates are implemented and green, but the phase is
 **not production-complete**: its "selected parser strategy from ADR-001" deliverable
 still depends on evidence that does not exist yet. Per
 `docs/decisions/ADR-002-ingestion-parser-strategy.md` the strategy is configuration,
 the baseline can never be silently promoted to production, and every run made while
-ADR-001 is open is recorded as `degraded` and flagged for user review.
+ADR-001 is open is recorded as `degraded` and flagged for user review. Phase 3 also
+completed two Phase 2 API-contract gaps that its own required tests exposed: the
+`POST /api/v1/documents/{id}/feedback` correction endpoint (`docs/08_API_AND_DATA_CONTRACTS.md`
+section 13, previously undocumented as implemented) and the `query`/`type`/`issuer`/
+`from`/`to` filters on `GET /api/v1/documents` (section 14). Both are additive to the
+existing schema (migration `0003_phase3_feedback`) and do not change any Phase 2
+behavior.
 
 ### Phase 1 is still incomplete
 
@@ -40,7 +56,7 @@ production parser. Running the private benchmark is what closes both phases.
 | 0 | Repository and deterministic development foundation | COMPLETE | `941a5c4`; CI run `31787161450` |
 | 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Harness, adapters, router, CanonicalDocument v1 and CI gates complete; ADR-001 `PENDING EVIDENCE` |
 | 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Ingestion pipeline, APIs, schema, admin parser and Phase 2 CI gates complete; production parser strategy still blocked on ADR-001 |
-| 3 | Document archive and verification-first web UX | BLOCKED_BY_PHASE_2 | — |
+| 3 | Document archive and verification-first web UX | IN_PROGRESS | Web shell, archive, upload/status, verification workspace, correction UI and Phase 3 CI gates complete; inherits Phase 1/2's undecided parser strategy |
 | 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
@@ -194,3 +210,74 @@ ADR-001 Decision section and set it to `ACCEPTED`.
    `decided: true`, and point `PARSER_STRATEGY_PATH` at it.
 3. Re-run `make check`, confirm parse runs report `degraded = false`, and record the
    exit evidence here.
+
+### Phase 3 progress — 2026-08-17
+
+- Commit/PR: pending (working tree).
+- Test commands: `make web-component-tests`; `make web-e2e-smoke`; `make feedback-tests`;
+  `make frontend-format-check`; `make frontend-lint`; `make frontend-typecheck`;
+  `make frontend-build`; `make db-migration-test`; full `make check`.
+- CI status: `feedback-tests` and `web-e2e-smoke` jobs added to
+  `.github/workflows/ci.yml`; `web-e2e-smoke` runs the real API, worker and a headless
+  Chromium browser against a scratch SQLite database, no mocks and no private data.
+- ADR/benchmark artifacts: none required — the frontend stack (React/TypeScript, Vite,
+  Tailwind, Radix primitives styled to the shadcn/ui contract) was already decided by
+  `docs/decisions/ADR-0001-phase0-stack.md` and `docs/10_DESIGN_SYSTEM.md`.
+
+#### Delivered
+
+- Application shell: warm/editorial `Văn bản` archive as the only primary
+  destination; no `Trợ lý` navigation, tab or control anywhere (feature-gated to
+  Phase 4).
+- Login shell (IA-00): a screen/state handoff gated on real `/health` connectivity
+  evidence, never fabricating "invalid credentials" from a network failure.
+- Archive: document library rows with plain-language status, search (`query`) and
+  filters (`type`/`issuer`/date range), loading/empty/empty-filtered/error-with-stale-
+  data states.
+- Upload: drawer with local + server-side validation, all documented upload error
+  codes mapped to Vietnamese copy, offline state.
+- Processing: durable status timeline using the exact `docs/design/02_DOCUMENT_FLOW.md`
+  status vocabulary, terminal failure with retry/reprocess, unsupported-format state.
+- Verification workspace (`Document rail | Original PDF | Parsed content / metadata /
+  correction`): responsive at the documented desktop (>=1200px) / tablet (768–1199px)
+  / mobile (<768px) breakpoints, using the page-preview PNG endpoint with a bbox
+  highlight positioned proportionally to page dimensions (correct regardless of
+  render DPI).
+- `Đi tới nguồn`: resolves a field's citation to page + block, focuses the source
+  pane, and never renders a citation for an unresolved block (`Chưa có nguồn xác định`
+  instead).
+- Correction UI + backend: `ConfidenceField`/`CorrectionControl` submit to the new
+  append-only `POST .../feedback` endpoint; corrections are never written into
+  `parse_runs.canonical` — a read-time overlay in `app/feedback.py` layers
+  `review_status`/`corrected_value` onto the served canonical document, so the raw
+  prediction is provably preserved.
+- Accessibility: every icon-only control has an accessible name, status is never
+  color-only (icon + text pairing), 44px-ish touch targets, visible focus ring,
+  reduced-motion respected.
+
+#### Required tests added
+
+- Component: `UploadDrawer`, `ProcessingStatus`, `ConfidenceField` (metadata +
+  low-confidence), `CorrectionControl`, `SourceViewer` (citation/source jump).
+- API integration (mocked via MSW): upload happy path, failed-processing UI, retry
+  path, document search/filter, correction reflected without a full refetch.
+- Browser E2E (Playwright, real backend): `login -> upload -> processing -> open
+  document -> verify metadata -> jump to cited page -> correct field -> reload ->
+  correction persists`.
+- Backend: `services/api/tests/test_feedback_api.py` (persistence, latest-correction-
+  wins, unknown-document 404) and an extended
+  `test_document_list_supports_metadata_search` in `test_ingestion_integration.py`.
+
+#### Blocking the phase exit
+
+- Inherits Phase 1/2: every field/parse run a family user sees is `degraded` and
+  `Cần kiểm tra` until ADR-001 closes; the UI is honest about this but cannot make it
+  untrue.
+- No real authentication contract exists, so login cannot be more than the approved
+  screen/state handoff described in IA-00.
+
+#### To close Phase 3
+
+Phase 3 itself has no unmet exit criterion — the family workflow is demonstrable
+entirely from the browser. What remains is Phase 1/2's parser evidence (see above),
+which is a prerequisite for calling the *product*, not this phase, production-ready.

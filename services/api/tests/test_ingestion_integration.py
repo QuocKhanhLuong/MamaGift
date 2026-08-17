@@ -189,3 +189,32 @@ def test_document_list_is_paginated_and_filterable(
 
     ready = client.get(f"/api/v1/documents?status={DocumentStatus.READY_FOR_REVIEW.value}").json()
     assert ready["total"] == 1
+
+
+def test_document_list_supports_metadata_search(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths,
+) -> None:
+    upload(client, fixture_paths["cong_van"].read_bytes(), filename="cong-van.pdf")
+    upload(client, fixture_paths["quyet_dinh"].read_bytes(), filename="quyet-dinh.pdf")
+    process_next_job(session, storage, settings, "worker-a")
+    process_next_job(session, storage, settings, "worker-a")
+
+    by_query = client.get("/api/v1/documents?query=57%2FQ%C4%90-UBND").json()
+    assert by_query["total"] == 1
+    assert by_query["items"][0]["document_number"] == "57/QĐ-UBND"
+
+    by_type = client.get("/api/v1/documents?type=quyet_dinh").json()
+    assert by_type["total"] == 1
+    assert by_type["items"][0]["document_type"] == "quyet_dinh"
+
+    by_date_range = client.get("/api/v1/documents?from=2026-03-01&to=2026-03-31").json()
+    assert by_date_range["total"] == 1
+    assert by_date_range["items"][0]["issued_date"] == "2026-03-03"
+
+    no_match = client.get("/api/v1/documents?query=khong-ton-tai").json()
+    assert no_match["total"] == 0

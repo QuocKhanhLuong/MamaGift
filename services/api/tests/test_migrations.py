@@ -19,7 +19,7 @@ from alembic import command
 
 ALEMBIC_INI = "services/api/alembic.ini"
 
-EXPECTED_TABLES = {"app_metadata", "documents", "jobs", "parse_runs"}
+EXPECTED_TABLES = {"app_metadata", "documents", "jobs", "parse_runs", "feedback_events"}
 
 
 @pytest.fixture
@@ -155,6 +155,36 @@ def test_parse_run_version_is_unique_per_document(upgraded) -> None:
             connection.execute(text(insert_run), {"id": "prun_2", "now": now, "flag": False})
 
 
+def test_feedback_event_round_trip(upgraded) -> None:
+    now = datetime.now(UTC)
+    with upgraded.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO documents (id, filename, content_type, byte_size, "
+                "checksum_sha256, storage_uri, status, requires_user_review, "
+                "created_at, updated_at) VALUES "
+                "('doc_1', 'a.pdf', 'application/pdf', 10, 'abc', 'local://a', "
+                "'UPLOADED', :flag, :now, :now)"
+            ),
+            {"now": now, "flag": False},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO feedback_events (id, document_id, feedback_type, field_id, "
+                "corrected_value, created_at) VALUES "
+                "('fb_1', 'doc_1', 'critical_field_correction', 'field_deadline_1', "
+                "'2026-08-25', :now)"
+            ),
+            {"now": now},
+        )
+
+    with upgraded.connect() as connection:
+        row = connection.execute(
+            text("SELECT corrected_value FROM feedback_events WHERE id = 'fb_1'")
+        ).one()
+    assert row.corrected_value == "2026-08-25"
+
+
 def test_downgrade_removes_the_phase_two_tables(database_url: str) -> None:
     config = Config(ALEMBIC_INI)
     command.upgrade(config, "head")
@@ -164,7 +194,7 @@ def test_downgrade_removes_the_phase_two_tables(database_url: str) -> None:
     try:
         tables = set(inspect(engine).get_table_names())
         assert "app_metadata" in tables
-        assert not {"documents", "jobs", "parse_runs"} & tables
+        assert not {"documents", "jobs", "parse_runs", "feedback_events"} & tables
     finally:
         engine.dispose()
         command.downgrade(config, "base")

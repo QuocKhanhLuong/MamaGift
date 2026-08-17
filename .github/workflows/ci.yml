@@ -282,6 +282,76 @@ jobs:
           MAMAGIFT_TEST_DATABASE_URL: postgresql+psycopg://mamagift:mamagift@localhost:5432/mamagift
         run: uv run pytest services/api/tests/test_migrations.py -q
 
+  feedback-tests:
+    name: feedback-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Correction feedback: submit -> overlay on canonical, raw prediction preserved.
+      - name: Correction feedback tests
+        run: uv run pytest services/api/tests/test_feedback_api.py -q
+
+  web-e2e-smoke:
+    name: web-e2e-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install locked frontend dependencies
+        run: npm ci --prefix apps/web
+
+      - name: Install Playwright's Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # Real API + worker + SQLite, not mocks: upload -> processing -> open document
+      # -> verify metadata -> jump to cited page -> correct field -> reload -> the
+      # correction persists (docs/04_PHASE_PLAN.md Phase 3).
+      - name: Browser E2E flow
+        run: npm run test:e2e --prefix apps/web
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
   parser-benchmark-smoke:
     name: parser-benchmark-smoke
     runs-on: ubuntu-latest

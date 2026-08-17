@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Document, Job, ParseRun
+from .models import Document, FeedbackEvent, Job, ParseRun
 
 
 class DocumentSummary(BaseModel):
@@ -173,3 +173,36 @@ class ReprocessResponse(BaseModel):
 
     document: DocumentSummary
     job: JobSummary
+
+
+class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    feedback_type: str = Field(min_length=1)
+    field_id: str | None = None
+    corrected_value: str | None = None
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    document_id: str
+    feedback_type: str
+    field_id: str | None = None
+    corrected_value: str | None = None
+    comment: str | None = None
+    created_at: datetime
+
+    @classmethod
+    def from_model(cls, event: FeedbackEvent) -> FeedbackResponse:
+        return cls(
+            id=event.id,
+            document_id=event.document_id,
+            feedback_type=event.feedback_type,
+            field_id=event.field_id,
+            corrected_value=event.corrected_value,
+            comment=event.comment,
+            created_at=event.created_at,
+        )
