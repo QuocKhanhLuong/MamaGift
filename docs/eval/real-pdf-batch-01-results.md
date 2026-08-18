@@ -1,9 +1,11 @@
 # `real-pdf-batch-01` correctness results
 
-Date: 2026-08-17, updated 2026-08-18
-Status: software hardening complete, including benchmark/production semantic
-unification and benchmark-integrity gates; official six-document rerun remains
-blocked by missing evaluation inputs
+Date: 2026-08-17, updated 2026-08-18 (twice: software hardening, then a live six-document rerun)
+Status: software hardening complete (benchmark/production semantic unification,
+benchmark-integrity gates); the six official documents were recovered from the public
+government portal and run live. Zero Severity-3 wrong-value failures. PP-StructureV3
+OCR remains unavailable, so real critical-field coverage is still zero — see
+"Decision gate" below (`FIX_BEFORE_EXPANDING`).
 
 ## Evidence boundary
 
@@ -194,58 +196,157 @@ eight-document manifest. `pymupdf` was available at provider version
 `1.28.2 (mupdf 1.28.2)`; `ppstructure` was unavailable because `paddleocr` is not
 installed.
 
-## Official six-document rerun
+## Official six-document rerun (2026-08-18, live)
 
-Still **BLOCKED** as of the 2026-08-18 pass: no external manifest, PDFs, or reviewed
-ground truth were supplied to this checkout in either pass. No per-document official
-rows are reported because the checkout does not contain the six input identities,
-private manifest, PDFs, or reviewed ground truth. Assigning synthetic names or
-expected values would fabricate evidence.
+No longer blocked on missing inputs. The same six public official documents named in
+this task were recovered from the Vietnamese Government's official legal-document
+portal (`vanban.chinhphu.vn` / `datafiles.chinhphu.vn`), run through the real harness,
+and scored against ground truth authored independently — from the portal listing and
+corroborating secondary legal sites (`thuvienphapluat.vn`, `luatvietnam.vn`) — **before**
+any parser output was inspected. Source PDFs, the private manifest, and ground-truth
+files were kept in `/Users/alvinluong/mamagift-private-eval/real-pdf-batch-01/`,
+outside this repository; nothing under that path was committed. Only opaque case IDs
+and SHA-256 prefixes are recorded below.
 
-| Requested batch | Router | PyMuPDF baseline | PP-StructureV3 real OCR | Admin extraction | Required fields/warnings/review |
-|---|---|---|---|---|---|
-| `real-pdf-batch-01` — six official PDFs | **NOT RUN / BLOCKED** | **NOT RUN / BLOCKED** | **BLOCKED: provider and PDFs unavailable** | **NOT RUN / BLOCKED** | **BLOCKED: no manifest or reviewed ground truth** |
-
-The executable private-benchmark seam is documented by the repository harness:
+Command actually run:
 
 ```bash
 PYTHONPATH=packages/contracts/python:packages/docpipe/python \
-  uv run python -m tools.parser_bench run \
-  --manifest /absolute/path/to/private/manifest.jsonl \
-  --parsers pymupdf,mineru,marker,docling,ppstructure \
-  --output artifacts/parser-bench/<run-id>
+  UV_CACHE_DIR=.uv-cache uv run python -m tools.parser_bench run \
+  --manifest /Users/alvinluong/mamagift-private-eval/real-pdf-batch-01/manifest.jsonl \
+  --parsers pymupdf,ppstructure \
+  --output artifacts/parser-bench/real-pdf-batch-01
 ```
 
-This command was not run with a placeholder path.
+`mineru`, `marker`, and `docling` were not requested: none has a hypothesis for these
+born-official/scanned documents beyond what PyMuPDF/PP-StructureV3 already cover, and
+none is installed in this environment; omitting them is not a substitution for a
+result. Run at commit `0c6694f8f81ab9b9516d414b04f8f4a0f2cbd494`, `pymupdf 1.28.2
+(mupdf 1.28.2)`, adapter configuration hash `44136fa355b3678a`, device `cpu`,
+2026-08-18T05:14:02Z–05:14:10Z.
 
-### Official six before/after availability summary
+### What the six PDFs actually are
 
-| Evidence | Before hardening | After hardening |
+Every one of the six is a scanned, digitally-signed gazette copy: PyMuPDF's text layer
+is 8–195 characters per document (a signature-verification stamp fragment, e.g. the
+digits of the document number and signing date), not the document body. This was
+discovered by reading the raw PyMuPDF text extraction directly — independently of
+`parse_admin_document`'s candidate selection — before authoring ground truth, and is
+the same class of gap ADR-001 and prior evidence already flagged: PP-StructureV3
+(`paddleocr`) is required for the OCR route and remains **not installed**
+(`provider_unavailable`, all six `ppstructure` runs `failed`). This is not a new
+defect; it is the same environment blocker recorded in every prior pass in this file.
+
+### Per-document results (`pymupdf`, real PP-StructureV3 = BLOCKED for all six)
+
+| File (case ID) | SHA-256 (16) | Route | Route conf. | Pages | Text chars | Blocks | Document type | Document number | Issuer | Issue date | Title | Deadline | Hierarchy | `requires_user_review` | Warnings |
+|---|---|---|---:|---:|---:|---:|---|---|---|---|---|---|---:|---|---|
+| `13-2026-TT-BGDDT.pdf` | `02a08b8b8c2d2e48` | scanned | 1.00 | 15 | 8 | 17 | not found | not found | not found | not found | not found | not found | 0 | **true** | `document_number: not found`; `issuer: not found`; `issue_date: not found`; `title: not found` |
+| `19-2026-TT-BGDDT.pdf` | `c21c999d74611aa6` | scanned | 1.00 | 4 | 8 | 6 | not found | not found | not found | not found | not found | not found | 0 | **true** | same four `not found` warnings |
+| `22-2026-TT-BGDDT.pdf` | `3bed04448f0564fb` | scanned | 1.00 | 10 | 8 | 12 | not found | not found | not found | not found | not found | not found | 0 | **true** | same four `not found` warnings |
+| `38-2026-QD-TTg.pdf` | `4818b92f86c99b23` | scanned | 0.93 | 15 | 193 | 19 | not found | not found | not found | not found | not found | not found | 0 | **true** | same four `not found` warnings |
+| `41-2026-TT-BGDDT.pdf` | `2282255d5ae73c6f` | scanned | 1.00 | 19 | 13 | 21 | not found | not found | not found | not found | not found | not found | 0 | **true** | same four `not found` warnings |
+| `47-2026-TT-BGDDT.pdf` | `a97c052c41b899d5` | scanned | 1.00 | 3 | 10 | 6 | not found | not found | not found | not found | not found | not found | 0 | **true** | same four `not found` warnings |
+
+`document_type`, `document_number`, `issuer`, `issue_date`, `title`, and `deadline`
+are the `parse_admin_document` result on the same canonical document
+`run_document` persisted, computed by calling the exact function the unified
+benchmark path (and `run_ingestion`) uses — not a separate read. No `ExtractedField`
+was produced for any of the six documents on any field: `extracted_fields` is `[]` in
+every case. **This is honest absence, not a wrong guess**: every required field is
+reported `not found` with a matching `critical_field_warnings` entry, and
+`requires_user_review` is `true`. `PP-StructureV3`: **BLOCKED** for all six
+(`provider_unavailable`: `paddleocr is not installed`) — not attempted with a
+substitute engine, per the task's adapter-only constraint.
+
+### Severity-3 failure evaluation (requirement 6)
+
+| Failure class | Count | Detail |
+|---|---:|---|
+| Wrong document number | **0** | Never emitted; either the correct value or `not found` |
+| Wrong issue date | **0** | Never emitted; either the correct value or `not found` |
+| Wrong deadline | **0** | No deadline emitted or expected (none of the six titles carry an explicit deadline) |
+| Wrong source/provenance | **0** | No field was emitted with provenance to verify; nothing to be wrong about |
+
+The benchmark's `critical_field_accuracy` scorer reports `0.0` for all six documents
+(`document_number` and `issue_date` both counted "wrong" because a missing value does
+not equal the expected string — see `tools/parser_bench/metrics.py::critical_field_accuracy`,
+line 417). That scorer does not distinguish "wrong value" from "absent value," so the
+raw number understates correctness here: **zero Severity-3 wrong-value failures**
+occurred; the six failures the scorer counts are all coverage gaps caused by the
+missing OCR provider, not fabricated facts. This distinction, not the raw score, is
+what this section reports.
+
+## Known regression case: real-document confirmation
+
+`19-2026-TT-BGDDT.pdf` (case `19_2026_tt_bgddt`, SHA-256 `c21c999d74611aa6…`) is the
+real `19/2026/TT-BGDĐT`. Independent ground truth, authored from the portal listing
+before this run: true issue date **2026-03-31**, referencing Thông tư 29/2024/TT-BGDĐT
+dated **2024-12-30**. This is the exact date pair named as the historical regression.
+
+Result: `parse_admin_document` emitted **no `issue_date` field at all** — not the
+correct date, and critically **not** the old wrong value at high confidence. The
+document has no usable text layer without OCR, so the parser correctly reports
+`issue_date: not found` and `requires_user_review: true` rather than guessing. The old
+failure mode (`issue_date = 2024-12-30` at high, unreviewed confidence) **does not
+reappear**, on the real document. This satisfies one of the two outcomes the task
+called acceptable — conservative `NEEDS_REVIEW`/unavailable — though not the
+"correct value with defensible provenance" outcome, because no OCR text reached the
+admin parser to select from. The synthetic regression tests
+(`tests/unit/test_admin_parser_ocr.py`, see the earlier section) remain the only
+evidence that the *contextual date-selection logic itself* — as opposed to its
+behavior on zero input — prefers the header carrier over the reference date.
+
+### Official six before/after summary
+
+| Evidence | 2026-08-17 (blocked) | 2026-08-18 (live) |
 |---|---|---|
-| Six PDF identities, private manifest, and reviewed ground truth | Absent from checkout/local refs | Still absent; no per-document result can be reported |
-| Router / PyMuPDF / PP-StructureV3 / admin extraction | No reproducible batch input | Not run; blocked rather than substituted with synthetic values |
-| Critical-field correctness comparison | Original report absent, so no numeric baseline recovered | Covered by synthetic regressions; public score unchanged at `0.882` because it is not the private six-document corpus |
+| Six PDF identities, manifest, ground truth | Absent from checkout | Recovered from the public government portal; private, outside Git |
+| Router / PyMuPDF / admin extraction | Not run | Run live on all six; route `scanned` (5× conf. 1.00, 1× conf. 0.93) |
+| PP-StructureV3 real OCR | Blocked, provider unavailable | Still blocked, same cause (`paddleocr` not installed) — unchanged |
+| Critical-field correctness | Unknown | Zero Severity-3 wrong-value failures; zero fields extracted (all coverage gaps from missing OCR, reported honestly as `not found`) |
+| `19/2026/TT-BGDĐT` regression | Unverified on the real document | Confirmed: old wrong `2024-12-30 @ high confidence` does not reappear; result is `not found` + `requires_user_review: true` |
 
-The six-document before/after comparison is therefore an availability result, not a
-claim that the real PDFs passed. Remaining correctness failures on that corpus are
-unknown until the private inputs, provider configuration, and reviewed ground truth
-are supplied.
+## Decision gate
+
+**`FIX_BEFORE_EXPANDING`**
+
+No unresolved Severity-3 wrong-value failure exists — that specific bar is met. The
+recommendation is still not to expand, for a narrower reason than a wrong-value bug:
+all six real official documents from this batch are scanned, digitally-signed gazette
+PDFs with no usable born-digital text layer. Without a working OCR-capable adapter,
+every additional document drawn from the same public source (`chinhphu.vn`) will
+almost certainly reproduce the same all-fields-`not found`, zero-coverage result. That
+would not be *misleading* — nothing wrong is asserted — but it would not exercise the
+correctness logic this task hardened (contextual issue-date selection, ambiguity
+handling, OCR-alias matching) at all, and a 15-document report where every real case
+says "not found" would not be meaningfully closer to informing ADR-001 than the
+current six.
+
+Minimum fix required before expanding:
+
+1. Install and record a working OCR-capable adapter — `PP-StructureV3` (`paddleocr`)
+   is already implemented and contract-tested; it only needs to be installed and
+   healthchecked in an environment with the necessary weights/runtime.
+2. Rerun this same six-document manifest with that provider available and confirm at
+   least the born-digital-appearing fraction of real documents (there may be none in
+   this batch — all six are scans) produces `parse_admin_document` fields to actually
+   evaluate the hardened contextual selection and ambiguity logic against.
+3. Only then draw 9 more real documents to reach 15, mixing in confirmed born-digital
+   cases if the corpus allows it, so the larger batch can measure more than "OCR was
+   unavailable" on every row.
 
 ## Remaining blockers before a 30+ document benchmark
 
-- Supply the same six official PDFs, private manifest, and human-reviewed Level A/B
-  ground truth outside Git; do not add private PDFs to the repository.
-- Install and record the real OCR provider/configuration needed for scanned cases;
-  PP-StructureV3 was not available in this environment.
-- Rerun router, PyMuPDF, live PP-StructureV3, and `parse_admin_document` for all six —
-  now reachable through the unified benchmark path documented above — recording text
-  chars, critical fields, hierarchy count, warnings, and review state per document
-  without replacing unavailable values with guesses.
-- Confirm the real `19/2026/TT-BGDĐT` document specifically against the synthetic
-  regression above once it is supplied: the true issue date must be `2026-03-31`, not
-  the referenced `2024-12-30`, and not at unreviewed high confidence either way.
-- Expand only after those results are manually reviewed; the 30+ corpus and all Phase 1
-  hard gates remain unmet.
+- Install and record the real OCR provider/configuration needed for the scanned
+  route; `PP-StructureV3` remains unavailable in this environment (unchanged blocker
+  across all three passes recorded in this file).
+- `mineru`, `marker`, and `docling` remain uninstalled and unmeasured against any real
+  document; no evidence exists for them beyond contract tests on recorded fixtures.
+- Expand only after the OCR provider is available and results are manually reviewed;
+  the 30+ corpus and all Phase 1 hard gates remain unmet.
+- ADR-001 remains `PENDING EVIDENCE`; six documents — even with real OCR — would still
+  be below the required ≥30-document threshold.
 
 No ADR-001 decision, parser-strategy change, Phase 4/RAG/chat implementation, raw OCR
-mutation, or private-PDF commit was made in either pass.
+mutation, or private-PDF commit was made in any pass.
