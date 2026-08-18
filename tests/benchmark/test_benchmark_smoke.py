@@ -153,6 +153,28 @@ def test_metrics_never_fabricate_scores_for_unlabelled_documents(tmp_path: Path)
     assert set(unlabelled.metrics) == {"route_accuracy"}
 
 
+def test_run_document_rejects_a_ground_truth_identity_mismatch(tmp_path: Path) -> None:
+    """Defense in depth: even bypassing `check_manifest_files`, the runner itself
+    must never score one document against another document's ground truth."""
+    from tools.parser_bench.manifest import ManifestEntry, ManifestError
+    from tools.parser_bench.runner import run_document
+
+    from mamagift_docpipe.router import inspect_pdf
+
+    entry = ManifestEntry(
+        document_id="a_different_document_id",
+        path="benchmarks/parser/fixtures/cong_van_born_digital.pdf",
+        route_label="born_digital",
+        difficulty="easy",
+        provenance="synthetic",
+        ground_truth="benchmarks/parser/ground_truth/cong_van_born_digital.json",
+    )
+    inspection = inspect_pdf(entry.resolve_path(REPO_ROOT), entry.document_id)
+
+    with pytest.raises(ManifestError, match="does not match manifest entry"):
+        run_document("pymupdf", entry, inspection, REPO_ROOT, tmp_path / "run")
+
+
 def test_cli_validate_and_run_exit_zero(tmp_path: Path) -> None:
     assert main(["validate", "--manifest", str(MANIFEST)]) == 0
     assert main(["health", "--parsers", "pymupdf,mineru"]) == 0

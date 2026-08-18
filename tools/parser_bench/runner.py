@@ -32,7 +32,7 @@ from .critical_fields import (
     extract_critical_fields,
     severity_3_failures,
 )
-from .manifest import ManifestEntry, load_ground_truth
+from .manifest import ManifestEntry, ManifestError, load_ground_truth
 from .metrics import (
     METRICS_VERSION,
     MetricResult,
@@ -205,6 +205,14 @@ def run_document(
     truth_path = entry.resolve_ground_truth(root)
     if truth_path is not None and truth_path.is_file():
         truth = load_ground_truth(truth_path)
+        if truth.document_id != entry.document_id:
+            # A manifest/ground-truth identity mismatch is a benchmark-integrity bug,
+            # not a parser result: scoring one document against another document's
+            # expected values must never silently happen.
+            raise ManifestError(
+                f"{entry.document_id}: ground truth document_id {truth.document_id!r} "
+                "does not match manifest entry"
+            )
         run.metrics.update(evaluate_document(document, truth))
 
         extracted = extract_critical_fields(document)

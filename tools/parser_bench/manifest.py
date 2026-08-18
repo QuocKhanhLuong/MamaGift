@@ -140,6 +140,25 @@ def load_ground_truth(path: str | Path) -> GroundTruth:
     return GroundTruth.model_validate(payload)
 
 
+def _outside_repository_problem(
+    document_id: str, label: str, raw_path: str, root: Path
+) -> str | None:
+    """A private path must be absolute AND resolve outside the repository root.
+
+    An absolute path inside the checkout would still commit private evidence the
+    moment the repository itself is archived or copied, so both conditions are
+    required (`docs/05_TEST_STRATEGY.md` section 3).
+    """
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        return f"{document_id}: private {label} must use an absolute path outside the repository"
+    try:
+        candidate.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    return f"{document_id}: private {label} path must be outside the repository, not {candidate}"
+
+
 def check_manifest_files(entries: list[ManifestEntry], root: Path) -> list[str]:
     """Return human-readable problems with a manifest's referenced files."""
     problems: list[str] = []
@@ -147,12 +166,33 @@ def check_manifest_files(entries: list[ManifestEntry], root: Path) -> list[str]:
         pdf_path = entry.resolve_path(root)
         if not pdf_path.is_file():
             problems.append(f"{entry.document_id}: missing PDF {pdf_path}")
+
         truth_path = entry.resolve_ground_truth(root)
-        if truth_path is not None and not truth_path.is_file():
-            problems.append(f"{entry.document_id}: missing ground truth {truth_path}")
-        if entry.provenance is Provenance.PRIVATE and not Path(entry.path).is_absolute():
-            problems.append(
-                f"{entry.document_id}: private documents must use an absolute path "
-                "outside the repository"
-            )
+        if truth_path is not None:
+            if not truth_path.is_file():
+                problems.append(f"{entry.document_id}: missing ground truth {truth_path}")
+            else:
+                try:
+                    truth = load_ground_truth(truth_path)
+                except (json.JSONDecodeError, ValidationError) as exc:
+                    problems.append(
+                        f"{entry.document_id}: invalid ground truth {truth_path}: {exc}"
+                    )
+                else:
+                    if truth.document_id != entry.document_id:
+                        problems.append(
+                            f"{entry.document_id}: ground truth document_id "
+                            f"{truth.document_id!r} does not match manifest entry"
+                        )
+
+        if entry.provenance is Provenance.PRIVATE:
+            problem = _outside_repository_problem(entry.document_id, "document", entry.path, root)
+            if problem is not None:
+                problems.append(problem)
+            if entry.ground_truth is not None:
+                problem = _outside_repository_problem(
+                    entry.document_id, "ground truth", entry.ground_truth, root
+                )
+                if problem is not None:
+                    problems.append(problem)
     return problems

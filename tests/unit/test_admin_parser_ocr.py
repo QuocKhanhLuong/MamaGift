@@ -188,9 +188,16 @@ def test_conflicting_header_dates_and_numbers_are_never_accepted_without_review(
             for warning in parsed.quality_report.critical_field_warnings
         )
 
+    # The benchmark extractor now delegates to `parse_admin_document`, so it must
+    # return exactly the same retained/omitted values as the product path above —
+    # never a second, independently-computed answer for the same conflict.
     benchmark_fields = extract_critical_fields(document)
-    assert benchmark_fields["document_number"] is None
-    assert benchmark_fields["issue_date"] is None
+    assert benchmark_fields["document_number"] == (
+        fields["document_number"].normalized_value if "document_number" in fields else None
+    )
+    assert benchmark_fields["issue_date"] == (
+        fields["issue_date"].normalized_value if "issue_date" in fields else None
+    )
 
 
 @pytest.mark.parametrize("number_label", ["Số:", "S:"])

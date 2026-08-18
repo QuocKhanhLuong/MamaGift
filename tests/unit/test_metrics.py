@@ -328,3 +328,36 @@ def test_critical_field_extraction_on_an_authored_document() -> None:
     assert fields["issuer"] == "ỦY BAN NHÂN DÂN XÃ MAI GIANG"
     assert fields["title"] == "hướng dẫn nộp hồ sơ tuyển sinh"
     assert fields["signer"] is None, "no signature block, so no signer may be invented"
+
+
+def test_benchmark_deadline_before_issue_line_stays_distinct_from_issue_date() -> None:
+    document = document_from(
+        [
+            ("text", "ỦY BAN NHÂN DÂN XÃ MAI GIANG"),
+            ("text", "Số: 12/UBND-VP"),
+            ("text", "Báo cáo kết quả chậm nhất là ngày 20 tháng 8 năm 2026."),
+            ("text", "Mai Giang, ngày 14 tháng 8 năm 2026"),
+            ("text", "V/v hướng dẫn nộp hồ sơ tuyển sinh"),
+        ]
+    )
+
+    fields = extract_critical_fields(document)
+
+    assert fields["deadline"] == "2026-08-20"
+    assert fields["issue_date"] == "2026-08-14"
+
+
+def test_benchmark_recognizes_abbreviated_number_label_and_rejects_invalid_date() -> None:
+    document = document_from(
+        [
+            ("text", "ỦY BAN NHÂN DÂN XÃ MAI GIANG"),
+            ("text", "SO: 45/QĐ-UBND"),
+            ("text", "Mai Giang, ngày 31 tháng 4 năm 2026"),
+            ("text", "V/v ban hành quy chế"),
+        ]
+    )
+
+    fields = extract_critical_fields(document)
+
+    assert fields["document_number"] == "45/QĐ-UBND"
+    assert fields["issue_date"] is None, "31 April is not a valid calendar date"

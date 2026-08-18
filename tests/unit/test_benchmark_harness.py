@@ -134,6 +134,44 @@ def test_private_documents_must_live_outside_the_repository(tmp_path: Path) -> N
     assert any("absolute path" in problem for problem in problems)
 
 
+def test_private_absolute_path_inside_the_repository_is_still_rejected(tmp_path: Path) -> None:
+    """An absolute path is not enough: it must also resolve outside the checkout."""
+    bad = json.loads(VALID_LINE)
+    bad["provenance"] = "private"
+    bad["path"] = str(REPO_ROOT / "benchmarks/parser/fixtures/cong_van_born_digital.pdf")
+    entries = load_manifest(write_manifest(tmp_path, [json.dumps(bad)]))
+
+    problems = check_manifest_files(entries, REPO_ROOT)
+    assert any("outside the repository" in problem for problem in problems)
+
+
+def test_private_ground_truth_inside_the_repository_is_rejected(tmp_path: Path) -> None:
+    bad = json.loads(VALID_LINE)
+    bad["provenance"] = "private"
+    bad["path"] = "/nonexistent/outside/private-doc.pdf"
+    bad["ground_truth"] = str(
+        REPO_ROOT / "benchmarks/parser/ground_truth/cong_van_born_digital.json"
+    )
+    entries = load_manifest(write_manifest(tmp_path, [json.dumps(bad)]))
+
+    problems = check_manifest_files(entries, REPO_ROOT)
+    assert any(
+        "ground truth" in problem and "outside the repository" in problem for problem in problems
+    )
+
+
+def test_ground_truth_document_id_mismatch_is_rejected(tmp_path: Path) -> None:
+    """Scoring one document against another document's expected values is a bug,
+    not a benchmark result."""
+    bad = json.loads(VALID_LINE)
+    bad["document_id"] = "doc_a"
+    bad["ground_truth"] = "benchmarks/parser/ground_truth/cong_van_born_digital.json"
+    entries = load_manifest(write_manifest(tmp_path, [json.dumps(bad)]))
+
+    problems = check_manifest_files(entries, REPO_ROOT)
+    assert any("document_id" in problem and "does not match" in problem for problem in problems)
+
+
 # ----------------------------------------------------------------------- scoring
 
 
