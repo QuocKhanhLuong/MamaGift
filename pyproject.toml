@@ -28,7 +28,7 @@ package = false
 default-groups = ["dev"]
 
 [tool.pytest.ini_options]
-testpaths = ["services/api/tests", "tests"]
+testpaths = ["services/api/tests", "services/ai-worker/tests", "tests"]
 pythonpath = [
     ".",
     "services/api",
