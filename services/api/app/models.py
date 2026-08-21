@@ -16,6 +16,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -65,6 +66,9 @@ class Document(Base):
 
     jobs: Mapped[list[Job]] = relationship(back_populates="document", cascade="all, delete-orphan")
     parse_runs: Mapped[list[ParseRun]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+    document_chunks: Mapped[list[DocumentChunk]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
 
@@ -161,3 +165,45 @@ class FeedbackEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class DocumentChunk(Base):
+    """A persisted chunk of a parsed document version (`docs/superpowers/plans/...` section 3.6).
+
+    Chunks are derived data, never authoritative: reparsing writes a new
+    `parse_run_id` and its own rows; old rows remain until explicitly dropped
+    and must never be returned for a current-version query.
+    """
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "parse_run_id", "chunk_index", name="uq_document_chunks_parse_run_chunk_index"
+        ),
+        Index("ix_document_chunks_document_id_parse_run_id", "document_id", "parse_run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(256), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    parse_run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    parent_chunk_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    section_path: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    page_numbers: Mapped[list[int]] = mapped_column(JSON, nullable=False)
+    source_block_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    embedding_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    document: Mapped[Document] = relationship(back_populates="document_chunks")
