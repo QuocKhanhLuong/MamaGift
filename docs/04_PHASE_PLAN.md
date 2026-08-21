@@ -407,6 +407,77 @@ The mother/family-user workflow can be demonstrated entirely from the browser wi
 
 ---
 
+# Phase 3.5 — Evaluation + Retrieval Foundation
+
+## /goal
+
+**Build deterministic evaluation, evidence-scoping, and structure-aware retrieval
+foundations before implementing LLM/RAG.**
+
+## Deliverables
+
+- Provider-neutral retrieval/evidence scope contract (`family_id`, `user_id`,
+  `thread_id`, `document_id`, `document_version`/`parse_run_id`, archive scope) with
+  a fixed authority order: verified current `DocumentVersion` > archive/document
+  evidence > user/episodic memory. No memory backend is integrated; a verified
+  document fact is never silently overridden.
+- A structure-aware `Chunk` contract derived only from `CanonicalDocument`, with
+  parent/child links and full block/page provenance. Nothing is embedded or indexed.
+- Deterministic hierarchical chunkers: one over the existing legal
+  `Chương/Mục/Điều/Khoản/Điểm/Phụ lục` hierarchy, one for `Kế hoạch` plan structure
+  (`major section -> subsection/task -> child content`) that keeps each task's
+  owner/coordinating-unit/deadline scoped to that task alone, and a deterministic
+  one-block-per-chunk fallback for unstructured paragraphs — never fixed-token
+  windowing when canonical hierarchy exists.
+- `Kế hoạch` evaluation fixtures with nested sections, multiple tasks, distinct
+  owners/coordinating units/deadlines per task, verified not to cross-associate.
+- Deterministic evaluation schemas (`ParserSemanticCase`, `RetrievalQACase`), a
+  failure-analysis taxonomy (parser/chunking/retrieval/metadata-version vs.
+  generation/grounding), and per-document-type metric hooks — including
+  plan-specific task recall/order/owner/deadline accuracy, nested-hierarchy F1, and
+  table/appendix preservation.
+- Document-type slices (`cong_van`, `quyet_dinh`, `ke_hoach`, `thong_tu`,
+  `nghi_dinh`, `table_appendix`, `scanned`) so evaluation reporting is never a
+  single aggregate score.
+- A naive lexical (token-overlap) retrieval baseline seam and interface, so a later
+  hybrid/reranked implementation has a deterministic floor to beat.
+- A context/evidence budget contract (selected-document, conversation short-term,
+  user long-term memory, episodic memory, archive semantic evidence) with a debug
+  breakdown of what was offered vs. used. No production memory implementation.
+
+## Non-goals
+
+- Zep or any other memory backend; long-term/episodic memory implementation.
+- Embeddings, a vector store (Qdrant or otherwise), a reranker/CrossEncoder, Qwen,
+  or RAGAS.
+- BM25/dense/RRF hybrid retrieval beyond the minimal deterministic lexical seam.
+- Any LLM evaluator or generation step.
+- Starting Phase 4, or accepting ADR-001.
+- Resolving the PP-StructureV3/OCR blocker (`docs/eval/real-pdf-batch-01-results.md`)
+  — that remains a Phase 1/2 exit criterion, unaffected by this phase.
+
+## Required tests
+
+- Chunk IDs are deterministic across repeated builds of the same document.
+- Parent-child chunk links are valid; a dangling or cross-document/version parent
+  reference is rejected.
+- Source block/page provenance and document-version metadata survive chunking.
+- Plan task-owner-deadline relationships survive chunking, and two tasks with
+  different owners/deadlines never cross-associate.
+- Scope filters (`scope_matches`) cannot leak another document/version/family into
+  a retrieval result.
+- Unstructured fallback chunking is deterministic and never re-chunks a block the
+  legal/plan builders already claimed.
+- Eval schema validation (`ParserSemanticCase`, `RetrievalQACase`) rejects unknown
+  fields and missing required data.
+- Evidence-budget truncation never concatenates categories together and always
+  reports a debug breakdown.
+- Existing Phase 1/2/3 parser/ingestion/frontend tests remain green.
+
+## CI gate
+
+Add:
+
 # Phase 4 — Self-hosted LLM and grounded single-document Q&A
 
 ## /goal

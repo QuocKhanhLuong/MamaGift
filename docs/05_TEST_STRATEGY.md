@@ -354,6 +354,7 @@ Default CI must exclude `requires_gpu`, `requires_real_model`, and `private_benc
 | 1 | router, parser contracts, canonical schema, benchmark smoke |
 | 2 | ingestion integration, admin golden tests, state machine |
 | 3 | web components, upload/view/correction E2E |
+| 3.5 | chunk contract, scope-leak, plan task/owner/deadline, lexical-baseline seam, evidence-budget, eval-schema tests |
 | 4 | worker contract, single-doc retrieval eval, citation contract |
 | 5 | incremental indexing, cross-doc retrieval eval |
 | 6 | feedback/export/promotion/regression tooling |
@@ -371,3 +372,25 @@ A flaky test is a bug.
 ## 20. Definition of a testable feature
 
 A feature is not complete if its success can only be checked manually. Each phase should leave deterministic seams where model/network behavior can be replaced by fixtures/fakes.
+
+## 21. Phase 3.5 evaluation and retrieval-foundation tests
+
+Phase 3.5 adds a deterministic layer strictly downstream of `CanonicalDocument`:
+scope, `Chunk`, chunkers, eval schemas/taxonomy/metrics, a lexical baseline seam and
+an evidence-budget contract. None of it depends on a model, GPU, or private data.
+
+Cover at minimum:
+
+- chunk-ID determinism and parent/child validity (`validate_chunk_tree`);
+- provenance/version survival through chunking;
+- plan task-owner-deadline scoping, with an explicit two-tasks-different-deadlines
+  non-cross-association case;
+- scope-leak rejection at both the chunk-tree and lexical-search boundary;
+- fallback-chunking determinism and non-overlap with claimed blocks;
+- eval schema validation;
+- evidence-budget truncation and debug breakdown, never unbounded concatenation.
+
+Document-type slicing (`mamagift_eval.document_types`) means Phase 3.5+ evaluation
+reporting is never a single aggregate score; plan (`ke_hoach`) cases additionally
+report task recall, task order accuracy, task-owner/task-deadline association
+accuracy, deadline accuracy, nested-hierarchy F1 and table/appendix preservation.

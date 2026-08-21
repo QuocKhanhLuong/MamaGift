@@ -16,7 +16,7 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 	compose-config docs-check repository-hygiene secret-scan check dev \
 	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
 	ingestion-integration admin-parser-golden-tests db-migration-test worker serve-api \
-	web-component-tests web-e2e-smoke feedback-tests
+	web-component-tests web-e2e-smoke feedback-tests retrieval-eval-tests
 
 setup:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --locked
@@ -86,6 +86,17 @@ db-migration-test:
 feedback-tests:
 	$(UV_RUN) pytest services/api/tests/test_feedback_api.py -q
 
+# Phase 3.5 retrieval/evaluation-foundation gate.
+retrieval-eval-tests:
+	$(UV_RUN) pytest tests/unit/test_scope.py tests/unit/test_chunk_contract.py \
+		tests/unit/test_legal_chunking.py tests/unit/test_plan_chunking.py \
+		tests/unit/test_fallback_chunking.py tests/unit/test_chunk_builder.py \
+		tests/unit/test_lexical_baseline.py tests/unit/test_budget.py \
+		tests/unit/test_eval_schemas.py tests/unit/test_failure_taxonomy.py \
+		tests/unit/test_document_type_slices.py tests/unit/test_eval_metrics.py \
+		tests/golden/test_plan_chunking_golden.py -q
+
+
 # Drain the parse queue once against the configured database and storage.
 worker:
 	$(API_RUN) python -m app.worker --once
@@ -114,7 +125,7 @@ secret-scan:
 
 check: docs-check repository-hygiene secret-scan backend-format-check backend-lint backend-typecheck backend-test \
 	parser-contract-tests parser-benchmark-smoke \
-	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests \
+	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests retrieval-eval-tests \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config \
 	web-e2e-smoke
 
