@@ -83,7 +83,7 @@ def _document() -> CanonicalDocument:
 def test_claimed_blocks_are_never_re_chunked() -> None:
     chunks = build_fallback_chunks(_document(), claimed_block_ids={"b_1_0000"})
     assert len(chunks) == 1
-    assert chunks[0].chunk_id == "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001"
+    assert chunks[0].chunk_id == "chunk:doc_fallback_1:vnone:run_fallback_1:fallback_b_1_0001"
     assert chunks[0].source_block_ids == ["b_1_0001"]
     assert chunks[0].source_page_numbers == [1]
     assert chunks[0].text == "Đoạn văn thứ hai, cũng không có cấu trúc."
@@ -116,12 +116,12 @@ def test_fallback_chunks_are_paragraph_type() -> None:
 
 def test_fallback_chunking_is_deterministic_across_repeated_builds() -> None:
     document = _document()
-    first = build_fallback_chunks(document, claimed_block_ids=set())
-    second = build_fallback_chunks(document, claimed_block_ids=set())
+    first = build_fallback_chunks(document, claimed_block_ids=set(), document_version=1)
+    second = build_fallback_chunks(document, claimed_block_ids=set(), document_version=1)
     assert len(first) == 2
     assert [chunk.chunk_id for chunk in first] == [
-        "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0000",
-        "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001",
+        "chunk:doc_fallback_1:v1:run_fallback_1:fallback_b_1_0000",
+        "chunk:doc_fallback_1:v1:run_fallback_1:fallback_b_1_0001",
     ]
     assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
     assert [chunk.text for chunk in first] == [chunk.text for chunk in second]
@@ -192,8 +192,8 @@ def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
     )
     chunks = build_fallback_chunks(doc, claimed_block_ids={"b_1_0000"}, document_version=2)
     assert len(chunks) == 2
-    assert chunks[0].chunk_id == "chunk_doc_fallback_2_run_fallback_2_fallback_b_1_0001"
-    assert chunks[0].parent_chunk_id == "chunk_doc_fallback_2_run_fallback_2_h_art_1"
+    assert chunks[0].chunk_id == "chunk:doc_fallback_2:v2:run_fallback_2:fallback_b_1_0001"
+    assert chunks[0].parent_chunk_id == "chunk:doc_fallback_2:v2:run_fallback_2:h_art_1"
     assert chunks[0].document_version == 2
     assert chunks[0].document_type == "QUYẾT ĐỊNH"
     assert chunks[0].document_number == "01/QĐ-TTg"
@@ -207,7 +207,7 @@ def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
     assert chunks[0].chunk_type == ChunkType.PARAGRAPH
 
     # Block with custom heading parent has parent_chunk_id as None
-    assert chunks[1].chunk_id == "chunk_doc_fallback_2_run_fallback_2_fallback_b_1_0002"
+    assert chunks[1].chunk_id == "chunk:doc_fallback_2:v2:run_fallback_2:fallback_b_1_0002"
     assert chunks[1].parent_chunk_id is None
     assert chunks[1].document_version == 2
     assert chunks[1].document_type == "QUYẾT ĐỊNH"
@@ -222,7 +222,7 @@ def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
     assert chunks[1].chunk_type == ChunkType.PARAGRAPH
 
     article_chunk = Chunk(
-        chunk_id="chunk_doc_fallback_2_run_fallback_2_h_art_1",
+        chunk_id="chunk:doc_fallback_2:v2:run_fallback_2:h_art_1",
         document_id="doc_fallback_2",
         parse_run_id="run_fallback_2",
         document_version=2,
@@ -307,7 +307,7 @@ def test_block_with_blank_or_whitespace_text_is_skipped() -> None:
     )
     chunks = build_fallback_chunks(doc, claimed_block_ids=set())
     assert len(chunks) == 1
-    assert chunks[0].chunk_id == "chunk_doc_blank_test_run_blank_1_fallback_b_valid_1"
+    assert chunks[0].chunk_id == "chunk:doc_blank_test:vnone:run_blank_1:fallback_b_valid_1"
     assert chunks[0].text == "Nội dung hợp lệ."
     assert chunks[0].source_block_ids == ["b_valid_1"]
     assert chunks[0].chunk_type == ChunkType.PARAGRAPH
@@ -339,7 +339,7 @@ def test_single_block_document() -> None:
     )
     chunks = build_fallback_chunks(doc, claimed_block_ids=set(), document_version=1)
     assert len(chunks) == 1
-    assert chunks[0].chunk_id == "chunk_doc_single_block_run_single_1_fallback_b_single_1"
+    assert chunks[0].chunk_id == "chunk:doc_single_block:v1:run_single_1:fallback_b_single_1"
     assert chunks[0].parent_chunk_id is None
     assert chunks[0].document_id == "doc_single_block"
     assert chunks[0].parse_run_id == "run_single_1"
@@ -359,7 +359,7 @@ def test_claimed_block_ids_with_nonexistent_id() -> None:
         claimed_block_ids={"non_existent_block_999", "b_1_0000"},
     )
     assert len(chunks) == 1
-    assert chunks[0].chunk_id == "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001"
+    assert chunks[0].chunk_id == "chunk:doc_fallback_1:vnone:run_fallback_1:fallback_b_1_0001"
     assert chunks[0].source_block_ids == ["b_1_0001"]
     assert chunks[0].source_page_numbers == [1]
     assert chunks[0].text == "Đoạn văn thứ hai, cũng không có cấu trúc."
@@ -416,9 +416,9 @@ def test_multi_page_document_preserves_reading_order_and_pages() -> None:
     chunks = build_fallback_chunks(doc, claimed_block_ids={"b_1_0000"}, document_version=3)
     assert len(chunks) == 3
     assert [c.chunk_id for c in chunks] == [
-        "chunk_doc_multipage_run_mp_1_fallback_b_1_0001",
-        "chunk_doc_multipage_run_mp_1_fallback_b_2_0000",
-        "chunk_doc_multipage_run_mp_1_fallback_b_2_0001",
+        "chunk:doc_multipage:v3:run_mp_1:fallback_b_1_0001",
+        "chunk:doc_multipage:v3:run_mp_1:fallback_b_2_0000",
+        "chunk:doc_multipage:v3:run_mp_1:fallback_b_2_0001",
     ]
     assert [c.source_block_ids for c in chunks] == [["b_1_0001"], ["b_2_0000"], ["b_2_0001"]]
     assert [c.source_page_numbers for c in chunks] == [[1], [2], [2]]
@@ -430,6 +430,110 @@ def test_multi_page_document_preserves_reading_order_and_pages() -> None:
     assert all(c.document_version == 3 for c in chunks)
     assert all(c.document_id == "doc_multipage" for c in chunks)
     assert all(c.parse_run_id == "run_mp_1" for c in chunks)
+
+
+def test_fallback_chunk_ids_include_document_version_and_isolate_versions() -> None:
+    doc = _document()
+    v1_chunks = build_fallback_chunks(doc, claimed_block_ids=set(), document_version=1)
+    v2_chunks = build_fallback_chunks(doc, claimed_block_ids=set(), document_version=2)
+    vnone_chunks = build_fallback_chunks(doc, claimed_block_ids=set(), document_version=None)
+
+    for chunk in v1_chunks:
+        assert chunk.document_version == 1
+    for chunk in v2_chunks:
+        assert chunk.document_version == 2
+    for chunk in vnone_chunks:
+        assert chunk.document_version is None
+
+    v1_ids = [c.chunk_id for c in v1_chunks]
+    v2_ids = [c.chunk_id for c in v2_chunks]
+    vnone_ids = [c.chunk_id for c in vnone_chunks]
+
+    assert v1_ids != v2_ids
+    assert v1_ids != vnone_ids
+    assert v2_ids != vnone_ids
+
+    assert all(":v1:" in cid for cid in v1_ids)
+    assert all(":v2:" in cid for cid in v2_ids)
+    assert all(":vnone:" in cid for cid in vnone_ids)
+
+    validate_chunk_tree(v1_chunks)
+    validate_chunk_tree(v2_chunks)
+    validate_chunk_tree(vnone_chunks)
+
+
+def test_fallback_chunk_ids_do_not_collide_when_identifiers_contain_underscores() -> None:
+    doc1 = CanonicalDocument(
+        document_id="doc_a",
+        parser_run=ParserRun(
+            id="run_b_c",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=_document().pages,
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    doc2 = CanonicalDocument(
+        document_id="doc_a_b",
+        parser_run=ParserRun(
+            id="run_c",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=_document().pages,
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+
+    chunks1 = build_fallback_chunks(doc1, claimed_block_ids=set(), document_version=1)
+    chunks2 = build_fallback_chunks(doc2, claimed_block_ids=set(), document_version=1)
+
+    ids1 = {c.chunk_id for c in chunks1}
+    ids2 = {c.chunk_id for c in chunks2}
+
+    assert ids1.isdisjoint(ids2)
+
+
+def test_fallback_chunk_ids_do_not_collide_when_identifiers_contain_colons() -> None:
+    doc1 = CanonicalDocument(
+        document_id="doc:v1",
+        parser_run=ParserRun(
+            id="run",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=_document().pages,
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    doc2 = CanonicalDocument(
+        document_id="doc",
+        parser_run=ParserRun(
+            id="v1:run",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=_document().pages,
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+
+    chunks1 = build_fallback_chunks(doc1, claimed_block_ids=set(), document_version=1)
+    chunks2 = build_fallback_chunks(doc2, claimed_block_ids=set(), document_version=1)
+
+    ids1 = {c.chunk_id for c in chunks1}
+    ids2 = {c.chunk_id for c in chunks2}
+
+    assert ids1.isdisjoint(ids2)
 
 
 def test_missing_and_none_extracted_fields() -> None:

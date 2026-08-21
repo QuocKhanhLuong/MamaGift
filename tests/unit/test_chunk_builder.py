@@ -18,7 +18,7 @@ from mamagift_docpipe import (
     ParserRun,
     QualityReport,
 )
-from mamagift_retrieval.chunk import ChunkType
+from mamagift_retrieval.chunk import ChunkType, validate_chunk_tree
 from mamagift_retrieval.chunking import build_chunks
 
 pytestmark = pytest.mark.unit
@@ -399,7 +399,7 @@ def test_chunk_field_assertions_page_numbers_parse_run_text_and_types() -> None:
 
     # Fallback paragraph chunk (page 2)
     fallback = next(c for c in chunks if c.chunk_type == ChunkType.PARAGRAPH)
-    assert fallback.chunk_id == "chunk_doc_test_1_run_test_1_fallback_b_1_0002"
+    assert fallback.chunk_id == "chunk:doc_test_1:v5:run_test_1:fallback_b_1_0002"
     assert fallback.parent_chunk_id is None
     assert fallback.document_id == "doc_test_1"
     assert fallback.parse_run_id == "run_test_1"
@@ -465,7 +465,7 @@ def test_single_element_fallback_document() -> None:
     chunks = build_chunks(doc, document_version=1)
     assert len(chunks) == 1
     chunk = chunks[0]
-    assert chunk.chunk_id == "chunk_doc_single_fb_run_single_fb_fallback_b_single_0"
+    assert chunk.chunk_id == "chunk:doc_single_fb:v1:run_single_fb:fallback_b_single_0"
     assert chunk.parent_chunk_id is None
     assert chunk.chunk_type == ChunkType.PARAGRAPH
     assert chunk.text == "Văn bản thông báo đơn lẻ một đoạn."
@@ -593,5 +593,216 @@ def test_chunking_is_deterministic_across_repeated_builds() -> None:
     second = build_chunks(doc, document_version=1)
 
     assert [c.chunk_id for c in first] == [c.chunk_id for c in second]
+    assert [c.text for c in first] == [c.text for c in second]
+    assert [c.model_dump() for c in first] == [c.model_dump() for c in second]
+
+
+def test_mixed_document_with_legal_plan_and_fallback_resolves_all_parents() -> None:
+    """A mixed document containing legal hierarchy AND plan tasks AND unstructured paragraphs,
+    built through build_chunks, asserting every parent resolves and validate_chunk_tree passes.
+    """
+    legal_block = CanonicalBlock(
+        id="b_leg_0",
+        type=BlockType.HEADING,
+        text="Điều 1. Phạm vi điều chỉnh",
+        reading_order=0,
+        parent_id="h_art_1",
+        provenance=BlockProvenance(page_number=1),
+    )
+    fb_under_legal_block = CanonicalBlock(
+        id="b_fb_under_leg",
+        type=BlockType.PARAGRAPH,
+        text="Đoạn văn tự do đính kèm thuộc Điều 1.",
+        reading_order=1,
+        parent_id="h_art_1",
+        provenance=BlockProvenance(page_number=1),
+    )
+    fb_standalone_block = CanonicalBlock(
+        id="b_fb_standalone",
+        type=BlockType.PARAGRAPH,
+        text="Đoạn văn tự do đứng độc lập ở phần mở đầu.",
+        reading_order=2,
+        parent_id=None,
+        provenance=BlockProvenance(page_number=1),
+    )
+    plan_sec_block = CanonicalBlock(
+        id="b_plan_sec",
+        type=BlockType.HEADING,
+        text="I. MỤC TIÊU VÀ NHIỆM VỤ",
+        reading_order=3,
+        provenance=BlockProvenance(page_number=1),
+    )
+    plan_task_block = CanonicalBlock(
+        id="b_plan_task",
+        type=BlockType.PARAGRAPH,
+        text="1. Triển khai kế hoạch tuyển sinh",
+        reading_order=0,
+        provenance=BlockProvenance(page_number=2),
+    )
+    plan_owner_block = CanonicalBlock(
+        id="b_plan_owner",
+        type=BlockType.PARAGRAPH,
+        text="Đơn vị chủ trì: Phòng Giáo dục",
+        reading_order=1,
+        provenance=BlockProvenance(page_number=2),
+    )
+    plan_body_block = CanonicalBlock(
+        id="b_plan_body",
+        type=BlockType.PARAGRAPH,
+        text="Nội dung thực hiện chi tiết tại các trường.",
+        reading_order=2,
+        provenance=BlockProvenance(page_number=2),
+    )
+
+    page_1 = CanonicalPage(
+        page_number=1,
+        width=595.0,
+        height=842.0,
+        blocks=[legal_block, fb_under_legal_block, fb_standalone_block, plan_sec_block],
+    )
+    page_2 = CanonicalPage(
+        page_number=2,
+        width=595.0,
+        height=842.0,
+        blocks=[plan_task_block, plan_owner_block, plan_body_block],
+    )
+
+    hierarchy = [
+        HierarchyNode(
+            id="h_art_1",
+            kind=HierarchyKind.ARTICLE,
+            label="Điều 1",
+            text="Phạm vi điều chỉnh",
+            parent_id=None,
+            source_block_ids=["b_leg_0"],
+            ordinal=1,
+        )
+    ]
+
+    doc = CanonicalDocument(
+        document_id="doc_mixed_all",
+        parser_run=_parser_run("run_mixed_all"),
+        pages=[page_1, page_2],
+        hierarchy=hierarchy,
+        extracted_fields=[
+            _extracted("document_type", "ke_hoach"),
+            _extracted("document_number", "99/KH-UBND"),
+            _extracted("issuer", "UBND HUYỆN MAI GIANG"),
+            _extracted("issue_date", "2026-04-01"),
+        ],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+
+    chunks = build_chunks(doc, document_version=1)
+    chunk_by_id = {c.chunk_id: c for c in chunks}
+
+    # All chunk types must be present
+    types = {c.chunk_type for c in chunks}
+    assert ChunkType.LEGAL_ARTICLE in types
+    assert ChunkType.PLAN_SECTION in types
+    assert ChunkType.PLAN_TASK in types
+    assert ChunkType.PARAGRAPH in types
+
+    # Legal article chunk
+    legal_chunk = next(c for c in chunks if c.chunk_type == ChunkType.LEGAL_ARTICLE)
+    assert legal_chunk.chunk_id == "chunk:doc_mixed_all:v1:run_mixed_all:h_art_1"
+    assert legal_chunk.parent_chunk_id is None
+
+    # Plan section & task chunks
+    sec_chunk = next(c for c in chunks if c.chunk_type == ChunkType.PLAN_SECTION)
+    assert sec_chunk.chunk_id == "chunk:doc_mixed_all:v1:run_mixed_all:plan_section_01"
+    assert sec_chunk.parent_chunk_id is None
+
+    task_chunk = next(c for c in chunks if c.chunk_type == ChunkType.PLAN_TASK)
+    assert task_chunk.chunk_id == "chunk:doc_mixed_all:v1:run_mixed_all:plan_task_001"
+    assert task_chunk.parent_chunk_id == sec_chunk.chunk_id
+
+    # Fallback chunk referencing legal parent must resolve to legal chunk's unified ID
+    fb_under_leg_chunk = next(c for c in chunks if "b_fb_under_leg" in c.source_block_ids)
+    assert (
+        fb_under_leg_chunk.chunk_id
+        == "chunk:doc_mixed_all:v1:run_mixed_all:fallback_b_fb_under_leg"
+    )
+    assert fb_under_leg_chunk.parent_chunk_id == legal_chunk.chunk_id
+
+    # Standalone fallback chunk has no parent
+    fb_standalone_chunk = next(c for c in chunks if "b_fb_standalone" in c.source_block_ids)
+    assert (
+        fb_standalone_chunk.chunk_id
+        == "chunk:doc_mixed_all:v1:run_mixed_all:fallback_b_fb_standalone"
+    )
+    assert fb_standalone_chunk.parent_chunk_id is None
+
+    # Every parent_chunk_id must resolve in the combined tree
+    for chunk in chunks:
+        if chunk.parent_chunk_id is not None:
+            assert chunk.parent_chunk_id in chunk_by_id
+
+    # validate_chunk_tree must pass cleanly
+    validate_chunk_tree(chunks)
+
+
+def test_same_document_at_different_versions_has_zero_colliding_chunk_ids() -> None:
+    """The same document at two different document_version values produces
+    NO colliding chunk IDs.
+    """
+    doc = _plan_document()
+    v1_chunks = build_chunks(doc, document_version=1)
+    v2_chunks = build_chunks(doc, document_version=2)
+    vnone_chunks = build_chunks(doc, document_version=None)
+
+    v1_ids = {c.chunk_id for c in v1_chunks}
+    v2_ids = {c.chunk_id for c in v2_chunks}
+    vnone_ids = {c.chunk_id for c in vnone_chunks}
+
+    assert v1_ids.isdisjoint(v2_ids)
+    assert v1_ids.isdisjoint(vnone_ids)
+    assert v2_ids.isdisjoint(vnone_ids)
+
+    assert all(":v1:" in cid for cid in v1_ids)
+    assert all(":v2:" in cid for cid in v2_ids)
+    assert all(":vnone:" in cid for cid in vnone_ids)
+
+    validate_chunk_tree(v1_chunks)
+    validate_chunk_tree(v2_chunks)
+    validate_chunk_tree(vnone_chunks)
+
+
+def test_component_containing_separator_cannot_forge_another_chunk_id() -> None:
+    """A component whose content contains the separator character cannot
+    forge another chunk's ID.
+    """
+    doc_colon_1 = _mixed_document(document_id="doc:v1", run_id="run")
+    doc_colon_2 = _mixed_document(document_id="doc", run_id="v1:run")
+
+    chunks_1 = build_chunks(doc_colon_1, document_version=1)
+    chunks_2 = build_chunks(doc_colon_2, document_version=1)
+
+    ids_1 = {c.chunk_id for c in chunks_1}
+    ids2 = {c.chunk_id for c in chunks_2}
+
+    assert ids_1.isdisjoint(ids2)
+
+    doc_under_1 = _mixed_document(document_id="doc_a", run_id="run_b_c")
+    doc_under_2 = _mixed_document(document_id="doc_a_b", run_id="run_c")
+
+    chunks_u1 = build_chunks(doc_under_1, document_version=1)
+    chunks_u2 = build_chunks(doc_under_2, document_version=1)
+
+    ids_u1 = {c.chunk_id for c in chunks_u1}
+    ids_u2 = {c.chunk_id for c in chunks_u2}
+
+    assert ids_u1.isdisjoint(ids_u2)
+
+
+def test_determinism_across_repeated_builds_for_all_three_chunkers() -> None:
+    """Determinism across repeated builds for legal, plan and fallback chunkers combined."""
+    doc = _mixed_document(document_id="doc_det_all", run_id="run_det_all")
+    first = build_chunks(doc, document_version=3)
+    second = build_chunks(doc, document_version=3)
+
+    assert len(first) == len(second)
+    assert [c.chunk_id for c in first] == [c.chunk_id for c in second]
+    assert [c.parent_chunk_id for c in first] == [c.parent_chunk_id for c in second]
     assert [c.text for c in first] == [c.text for c in second]
     assert [c.model_dump() for c in first] == [c.model_dump() for c in second]

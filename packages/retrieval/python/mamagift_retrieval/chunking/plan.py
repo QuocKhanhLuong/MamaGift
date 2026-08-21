@@ -22,7 +22,7 @@ from mamagift_docpipe import BlockType, CanonicalDocument
 from mamagift_docpipe.admin import patterns as admin_pat
 
 from ..chunk import Chunk, ChunkType
-from ._shared import field_value
+from ._shared import chunk_id, field_value
 
 _FURNITURE_TYPES = frozenset({BlockType.HEADER, BlockType.FOOTER, BlockType.PAGE_NUMBER})
 
@@ -43,6 +43,7 @@ DEADLINE_RE = re.compile(
 @dataclass
 class _TaskState:
     chunk_id: str
+    content_chunk_id: str
     section_chunk_id: str | None
     section_path: list[str]
     ordinal: str
@@ -106,7 +107,12 @@ def build_plan_chunks(
                     flush_task()
                     section_index += 1
                     label_value, title = section_match.group(1), section_match.group(2).strip()
-                    section_id = f"chunk_{doc_id}_{run_id}_plan_section_{section_index:02d}"
+                    section_id = chunk_id(
+                        doc_id,
+                        document_version,
+                        run_id,
+                        f"plan_section_{section_index:02d}",
+                    )
                     section_path = [f"{label_value}. {title}"]
                     section_chunks.append(
                         Chunk(
@@ -135,7 +141,18 @@ def build_plan_chunks(
                     task_index += 1
                     ordinal, title = task_match.group(1), task_match.group(2).strip()
                     task = _TaskState(
-                        chunk_id=f"chunk_{doc_id}_{run_id}_plan_task_{task_index:03d}",
+                        chunk_id=chunk_id(
+                            doc_id,
+                            document_version,
+                            run_id,
+                            f"plan_task_{task_index:03d}",
+                        ),
+                        content_chunk_id=chunk_id(
+                            doc_id,
+                            document_version,
+                            run_id,
+                            f"plan_task_{task_index:03d}_content",
+                        ),
                         section_chunk_id=section_id,
                         section_path=[*section_path, f"{ordinal}. {title}"],
                         ordinal=ordinal,
@@ -210,7 +227,7 @@ def build_plan_chunks(
         if item.body_lines:
             task_chunks.append(
                 Chunk(
-                    chunk_id=f"{item.chunk_id}_content",
+                    chunk_id=item.content_chunk_id,
                     parent_chunk_id=item.chunk_id,
                     document_id=doc_id,
                     parse_run_id=run_id,

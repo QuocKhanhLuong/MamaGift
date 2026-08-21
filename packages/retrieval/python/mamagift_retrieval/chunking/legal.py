@@ -7,12 +7,10 @@ the Phase 3.5 `Chunk` contract; it never re-parses text and never invents struct
 
 from __future__ import annotations
 
-from urllib.parse import quote
-
 from mamagift_docpipe import CanonicalDocument, HierarchyKind, HierarchyNode
 
 from ..chunk import Chunk, ChunkType
-from ._shared import field_value
+from ._shared import chunk_id, field_value
 
 _KIND_TO_CHUNK_TYPE: dict[HierarchyKind, ChunkType] = {
     HierarchyKind.CHAPTER: ChunkType.LEGAL_CHAPTER,
@@ -22,22 +20,6 @@ _KIND_TO_CHUNK_TYPE: dict[HierarchyKind, ChunkType] = {
     HierarchyKind.POINT: ChunkType.LEGAL_POINT,
     HierarchyKind.APPENDIX: ChunkType.APPENDIX,
 }
-
-
-def _chunk_id(
-    document_id: str,
-    document_version: int | None,
-    parse_run_id: str,
-    node_id: str,
-) -> str:
-    version_part = f"v{document_version}" if document_version is not None else "vnone"
-    parts = [
-        quote(document_id, safe=""),
-        version_part,
-        quote(parse_run_id, safe=""),
-        quote(node_id, safe=""),
-    ]
-    return f"chunk:{':'.join(parts)}"
 
 
 def _section_path(node: HierarchyNode, by_id: dict[str, HierarchyNode]) -> list[str]:
@@ -82,7 +64,7 @@ def build_legal_chunks(
             {page_by_block[bid] for bid in node.source_block_ids if bid in page_by_block}
         )
         parent_chunk_id = (
-            _chunk_id(
+            chunk_id(
                 document.document_id,
                 document_version,
                 document.parser_run.id,
@@ -94,7 +76,7 @@ def build_legal_chunks(
 
         chunks.append(
             Chunk(
-                chunk_id=_chunk_id(
+                chunk_id=chunk_id(
                     document.document_id,
                     document_version,
                     document.parser_run.id,

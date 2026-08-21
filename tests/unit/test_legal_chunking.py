@@ -311,8 +311,8 @@ def test_chunk_ids_do_not_collide_when_identifiers_contain_underscores() -> None
 
 
 def test_chunk_ids_do_not_collide_when_identifiers_contain_colons() -> None:
-    doc1 = _document(document_id="doc:a", parse_run_id="run:b")
-    doc2 = _document(document_id="doc", parse_run_id="a:run:b")
+    doc1 = _document(document_id="doc:v1", parse_run_id="run")
+    doc2 = _document(document_id="doc", parse_run_id="v1:run")
 
     chunks1 = build_legal_chunks(doc1, document_version=1)
     chunks2 = build_legal_chunks(doc2, document_version=1)

@@ -10,7 +10,7 @@ from __future__ import annotations
 from mamagift_docpipe import BlockType, CanonicalDocument, HierarchyKind
 
 from ..chunk import Chunk, ChunkType
-from ._shared import field_value
+from ._shared import chunk_id, field_value
 
 _SKIP_TYPES = frozenset(
     {BlockType.HEADER, BlockType.FOOTER, BlockType.PAGE_NUMBER, BlockType.STAMP_REGION}
@@ -30,7 +30,7 @@ def build_fallback_chunks(
     issued_date = field_value(document, "issue_date")
 
     chunk_id_by_hierarchy = {
-        node.id: f"chunk_{doc_id}_{run_id}_{node.id}"
+        node.id: chunk_id(doc_id, document_version, run_id, node.id)
         for node in document.hierarchy
         if node.kind != HierarchyKind.CUSTOM_HEADING
     }
@@ -47,7 +47,7 @@ def build_fallback_chunks(
             )
             chunks.append(
                 Chunk(
-                    chunk_id=f"chunk_{doc_id}_{run_id}_fallback_{block.id}",
+                    chunk_id=chunk_id(doc_id, document_version, run_id, f"fallback_{block.id}"),
                     parent_chunk_id=parent_chunk_id,
                     document_id=doc_id,
                     parse_run_id=run_id,

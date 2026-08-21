@@ -147,10 +147,10 @@ def test_single_section_single_task_plan() -> None:
     section = next(c for c in chunks if c.chunk_type == ChunkType.PLAN_SECTION)
     task = next(c for c in chunks if c.chunk_type == ChunkType.PLAN_TASK)
 
-    assert section.chunk_id == "chunk_doc_plan_1_run_plan_1_plan_section_01"
+    assert section.chunk_id == "chunk:doc_plan_1:v2:run_plan_1:plan_section_01"
     assert section.parent_chunk_id is None
     assert section.document_version == 2
-    assert task.chunk_id == "chunk_doc_plan_1_run_plan_1_plan_task_001"
+    assert task.chunk_id == "chunk:doc_plan_1:v2:run_plan_1:plan_task_001"
     assert task.parent_chunk_id == section.chunk_id
     assert task.document_version == 2
     assert task.metadata["owner"] == "Sở GD&ĐT"
@@ -453,15 +453,81 @@ def test_duplicate_task_ordinals_generate_unique_chunk_ids() -> None:
     tasks = [c for c in chunks if c.chunk_type == ChunkType.PLAN_TASK]
     assert len(tasks) == 2
     assert tasks[0].chunk_id != tasks[1].chunk_id
-    assert tasks[0].chunk_id == "chunk_doc_plan_1_run_plan_1_plan_task_001"
-    assert tasks[1].chunk_id == "chunk_doc_plan_1_run_plan_1_plan_task_002"
+    assert tasks[0].chunk_id == "chunk:doc_plan_1:vnone:run_plan_1:plan_task_001"
+    assert tasks[1].chunk_id == "chunk:doc_plan_1:vnone:run_plan_1:plan_task_002"
     validate_chunk_tree(chunks)
+
+
+def test_plan_chunk_ids_include_document_version_and_isolate_versions() -> None:
+    doc = _plan_document()
+    v1_chunks = build_plan_chunks(doc, document_version=1)
+    v2_chunks = build_plan_chunks(doc, document_version=2)
+    vnone_chunks = build_plan_chunks(doc, document_version=None)
+
+    for chunk in v1_chunks:
+        assert chunk.document_version == 1
+    for chunk in v2_chunks:
+        assert chunk.document_version == 2
+    for chunk in vnone_chunks:
+        assert chunk.document_version is None
+
+    v1_ids = [c.chunk_id for c in v1_chunks]
+    v2_ids = [c.chunk_id for c in v2_chunks]
+    vnone_ids = [c.chunk_id for c in vnone_chunks]
+
+    assert v1_ids != v2_ids
+    assert v1_ids != vnone_ids
+    assert v2_ids != vnone_ids
+
+    assert all(":v1:" in cid for cid in v1_ids)
+    assert all(":v2:" in cid for cid in v2_ids)
+    assert all(":vnone:" in cid for cid in vnone_ids)
+
+    validate_chunk_tree(v1_chunks)
+    validate_chunk_tree(v2_chunks)
+    validate_chunk_tree(vnone_chunks)
+
+
+def test_plan_chunk_ids_do_not_collide_when_identifiers_contain_underscores() -> None:
+    doc1 = _plan_document()
+    doc1.document_id = "doc_a"
+    doc1.parser_run.id = "run_b_c"
+
+    doc2 = _plan_document()
+    doc2.document_id = "doc_a_b"
+    doc2.parser_run.id = "run_c"
+
+    chunks1 = build_plan_chunks(doc1, document_version=1)
+    chunks2 = build_plan_chunks(doc2, document_version=1)
+
+    ids1 = {c.chunk_id for c in chunks1}
+    ids2 = {c.chunk_id for c in chunks2}
+
+    assert ids1.isdisjoint(ids2)
+
+
+def test_plan_chunk_ids_do_not_collide_when_identifiers_contain_colons() -> None:
+    doc1 = _plan_document()
+    doc1.document_id = "doc:v1"
+    doc1.parser_run.id = "run"
+
+    doc2 = _plan_document()
+    doc2.document_id = "doc"
+    doc2.parser_run.id = "v1:run"
+
+    chunks1 = build_plan_chunks(doc1, document_version=1)
+    chunks2 = build_plan_chunks(doc2, document_version=1)
+
+    ids1 = {c.chunk_id for c in chunks1}
+    ids2 = {c.chunk_id for c in chunks2}
+
+    assert ids1.isdisjoint(ids2)
 
 
 def test_chunk_ids_are_deterministic_across_repeated_builds() -> None:
     document = _plan_document()
-    first = [chunk.chunk_id for chunk in build_plan_chunks(document)]
-    second = [chunk.chunk_id for chunk in build_plan_chunks(document)]
+    first = [chunk.chunk_id for chunk in build_plan_chunks(document, document_version=1)]
+    second = [chunk.chunk_id for chunk in build_plan_chunks(document, document_version=1)]
     assert first == second
 
 
