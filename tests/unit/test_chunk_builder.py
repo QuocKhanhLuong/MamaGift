@@ -191,52 +191,39 @@ def _plan_document(
 def test_build_chunks_enforces_tree_validation_on_contract_violations() -> None:
     """Deleting validate_chunk_tree at builder.py:42 must cause this test to fail.
 
-    Construct a document where a hierarchy node ID collides with a fallback chunk ID,
-    producing duplicate chunk_ids in the orchestrator's combined chunk list.
+    Construct a document where a hierarchy node is its own parent, violating the
+    chunk-tree contract.
     """
     article_block = CanonicalBlock(
         id="b_1_0000",
         type=BlockType.HEADING,
         text="Điều 1. Quy định chung",
         reading_order=0,
-        parent_id="fallback_b_1_0001",
+        parent_id="h_self",
         provenance=BlockProvenance(page_number=1),
     )
-    fallback_block = CanonicalBlock(
-        id="b_1_0001",
-        type=BlockType.PARAGRAPH,
-        text="Đoạn văn tự do không thuộc điều khoản.",
-        reading_order=1,
-        provenance=BlockProvenance(page_number=1),
-    )
-    page = CanonicalPage(
-        page_number=1, width=595.0, height=842.0, blocks=[article_block, fallback_block]
-    )
-    # The hierarchy node id "fallback_b_1_0001" generates chunk_id:
-    # "chunk_doc_dup_run_dup_fallback_b_1_0001" via legal chunker.
-    # The fallback chunker generates identical chunk_id for block "b_1_0001":
-    # "chunk_doc_dup_run_dup_fallback_b_1_0001".
+    page = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=[article_block])
     hierarchy = [
         HierarchyNode(
-            id="fallback_b_1_0001",
+            id="h_self",
             kind=HierarchyKind.ARTICLE,
             label="Điều 1",
             text="Quy định chung",
-            parent_id=None,
+            parent_id="h_self",
             source_block_ids=["b_1_0000"],
             ordinal=1,
         )
     ]
     doc = CanonicalDocument(
-        document_id="doc_dup",
-        parser_run=_parser_run("run_dup"),
+        document_id="doc_self",
+        parser_run=_parser_run("run_self"),
         pages=[page],
         hierarchy=hierarchy,
         extracted_fields=[_extracted("document_type", "quyet_dinh")],
         quality_report=QualityReport(route="born_digital", route_confidence=0.99),
     )
 
-    with pytest.raises(ValueError, match="duplicate chunk_id"):
+    with pytest.raises(ValueError, match="self-parent reference"):
         build_chunks(doc)
 
 
@@ -378,7 +365,7 @@ def test_chunk_field_assertions_page_numbers_parse_run_text_and_types() -> None:
 
     # Legal article chunk
     article = next(c for c in chunks if c.chunk_type == ChunkType.LEGAL_ARTICLE)
-    assert article.chunk_id == "chunk_doc_test_1_run_test_1_h_article_1"
+    assert article.chunk_id == "chunk:doc_test_1:v5:run_test_1:h_article_1"
     assert article.parent_chunk_id is None
     assert article.document_id == "doc_test_1"
     assert article.parse_run_id == "run_test_1"
@@ -395,7 +382,7 @@ def test_chunk_field_assertions_page_numbers_parse_run_text_and_types() -> None:
 
     # Legal clause chunk
     clause = next(c for c in chunks if c.chunk_type == ChunkType.LEGAL_CLAUSE)
-    assert clause.chunk_id == "chunk_doc_test_1_run_test_1_h_clause_1_1"
+    assert clause.chunk_id == "chunk:doc_test_1:v5:run_test_1:h_clause_1_1"
     assert clause.parent_chunk_id == article.chunk_id
     assert clause.document_id == "doc_test_1"
     assert clause.parse_run_id == "run_test_1"
@@ -521,7 +508,7 @@ def test_single_element_legal_document() -> None:
     chunks = build_chunks(doc, document_version=2)
     assert len(chunks) == 1
     chunk = chunks[0]
-    assert chunk.chunk_id == "chunk_doc_single_leg_run_single_leg_h_art_single"
+    assert chunk.chunk_id == "chunk:doc_single_leg:v2:run_single_leg:h_art_single"
     assert chunk.parent_chunk_id is None
     assert chunk.chunk_type == ChunkType.LEGAL_ARTICLE
     assert chunk.text == "Tên gọi và trụ sở"
