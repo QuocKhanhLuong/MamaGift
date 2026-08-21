@@ -96,86 +96,87 @@ def build_plan_chunks(
         for block in sorted(page.blocks, key=lambda item: item.reading_order):
             if block.type in _FURNITURE_TYPES:
                 continue
-            line = block.text.strip().split("\n", 1)[0].strip()
-            if not line:
-                continue
+            for raw_line in block.text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
 
-            section_match = PLAN_SECTION_RE.match(line)
-            if section_match:
-                flush_task()
-                section_index += 1
-                label_value, title = section_match.group(1), section_match.group(2).strip()
-                section_id = f"chunk_{doc_id}_{run_id}_plan_section_{section_index:02d}"
-                section_path = [f"{label_value}. {title}"]
-                section_chunks.append(
-                    Chunk(
-                        chunk_id=section_id,
-                        parent_chunk_id=None,
-                        document_id=doc_id,
-                        parse_run_id=run_id,
-                        document_version=document_version,
-                        document_type=doc_type,
-                        document_number=doc_number,
-                        issuer=issuer,
-                        issued_date=issued_date,
-                        section_path=section_path,
-                        chunk_type=ChunkType.PLAN_SECTION,
-                        text=title,
-                        source_block_ids=[block.id],
-                        source_page_numbers=[page.page_number],
-                        metadata={"ordinal": label_value},
+                section_match = PLAN_SECTION_RE.match(line)
+                if section_match:
+                    flush_task()
+                    section_index += 1
+                    label_value, title = section_match.group(1), section_match.group(2).strip()
+                    section_id = f"chunk_{doc_id}_{run_id}_plan_section_{section_index:02d}"
+                    section_path = [f"{label_value}. {title}"]
+                    section_chunks.append(
+                        Chunk(
+                            chunk_id=section_id,
+                            parent_chunk_id=None,
+                            document_id=doc_id,
+                            parse_run_id=run_id,
+                            document_version=document_version,
+                            document_type=doc_type,
+                            document_number=doc_number,
+                            issuer=issuer,
+                            issued_date=issued_date,
+                            section_path=section_path,
+                            chunk_type=ChunkType.PLAN_SECTION,
+                            text=title,
+                            source_block_ids=[block.id],
+                            source_page_numbers=[page.page_number],
+                            metadata={"ordinal": label_value},
+                        )
                     )
-                )
-                continue
+                    continue
 
-            task_match = PLAN_TASK_RE.match(line)
-            if task_match:
-                flush_task()
-                task_index += 1
-                ordinal, title = task_match.group(1), task_match.group(2).strip()
-                task = _TaskState(
-                    chunk_id=f"chunk_{doc_id}_{run_id}_plan_task_{task_index:03d}",
-                    section_chunk_id=section_id,
-                    section_path=[*section_path, f"{ordinal}. {title}"],
-                    ordinal=ordinal,
-                    title=title,
-                )
-                task.heading_block_ids.append(block.id)
-                task.heading_pages.add(page.page_number)
-                continue
+                task_match = PLAN_TASK_RE.match(line)
+                if task_match:
+                    flush_task()
+                    task_index += 1
+                    ordinal, title = task_match.group(1), task_match.group(2).strip()
+                    task = _TaskState(
+                        chunk_id=f"chunk_{doc_id}_{run_id}_plan_task_{task_index:03d}",
+                        section_chunk_id=section_id,
+                        section_path=[*section_path, f"{ordinal}. {title}"],
+                        ordinal=ordinal,
+                        title=title,
+                    )
+                    task.heading_block_ids.append(block.id)
+                    task.heading_pages.add(page.page_number)
+                    continue
 
-            if task is None:
-                # Body text before any task started (a section preamble) belongs to
-                # no task's scope; the fallback chunker picks it up separately.
-                continue
+                if task is None:
+                    # Body text before any task started (a section preamble) belongs to
+                    # no task's scope; the fallback chunker picks it up separately.
+                    continue
 
-            owner_match = OWNER_RE.match(line)
-            if owner_match:
-                task.owner = owner_match.group(1).strip()
-                task.heading_block_ids.append(block.id)
-                task.heading_pages.add(page.page_number)
-                continue
+                owner_match = OWNER_RE.match(line)
+                if owner_match:
+                    task.owner = owner_match.group(1).strip()
+                    task.heading_block_ids.append(block.id)
+                    task.heading_pages.add(page.page_number)
+                    continue
 
-            coordinator_match = COORDINATOR_RE.match(line)
-            if coordinator_match:
-                task.coordinating_unit = coordinator_match.group(1).strip()
-                task.heading_block_ids.append(block.id)
-                task.heading_pages.add(page.page_number)
-                continue
+                coordinator_match = COORDINATOR_RE.match(line)
+                if coordinator_match:
+                    task.coordinating_unit = coordinator_match.group(1).strip()
+                    task.heading_block_ids.append(block.id)
+                    task.heading_pages.add(page.page_number)
+                    continue
 
-            deadline_match = DEADLINE_RE.match(line)
-            if deadline_match:
-                raw = deadline_match.group(1).strip()
-                task.deadline_raw = raw
-                parsed = admin_pat.parse_vietnamese_date(raw)
-                task.deadline = parsed[1] if parsed else None
-                task.heading_block_ids.append(block.id)
-                task.heading_pages.add(page.page_number)
-                continue
+                deadline_match = DEADLINE_RE.match(line)
+                if deadline_match:
+                    raw = deadline_match.group(1).strip()
+                    task.deadline_raw = raw
+                    parsed = admin_pat.parse_vietnamese_date(raw)
+                    task.deadline = parsed[1] if parsed else None
+                    task.heading_block_ids.append(block.id)
+                    task.heading_pages.add(page.page_number)
+                    continue
 
-            task.body_lines.append(line)
-            task.content_block_ids.append(block.id)
-            task.content_pages.add(page.page_number)
+                task.body_lines.append(line)
+                task.content_block_ids.append(block.id)
+                task.content_pages.add(page.page_number)
 
     flush_task()
 
