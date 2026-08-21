@@ -15,11 +15,23 @@ from .metrics import (
 )
 from .schemas import ExpectedTaskRelation, ParserSemanticCase, RetrievalQACase
 
+try:
+    from .taxonomy import (  # type: ignore[import-not-found]
+        FailureDiagnosis,
+        FailureLabel,
+        classify_failure,
+    )
+except ImportError:  # pragma: no cover
+    pass
+
 __all__ = [
     "DOCUMENT_TYPE_SLICES",
     "ExpectedTaskRelation",
+    "FailureDiagnosis",
+    "FailureLabel",
     "ParserSemanticCase",
     "RetrievalQACase",
+    "classify_failure",
     "deadline_accuracy",
     "nested_hierarchy_f1",
     "slice_by_document_type",
