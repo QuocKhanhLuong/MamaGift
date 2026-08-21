@@ -478,6 +478,21 @@ foundations before implementing LLM/RAG.**
 
 Add:
 
+```text
+retrieval-eval-tests
+```
+
+## Exit criteria
+
+The evidence scope contract, `Chunk` contract, legal/plan/fallback chunkers, eval
+schemas/taxonomy/metrics, document-type slicing, the naive lexical baseline seam
+and the evidence-budget contract are implemented and covered by green deterministic
+tests, with no embeddings/vector store/memory backend/reranker/LLM evaluator
+introduced. Phase 4 remains not started; ADR-001 remains `PENDING EVIDENCE`; the
+PP-StructureV3/OCR blocker is unchanged and still documented as open.
+
+---
+
 # Phase 4 — Self-hosted LLM and grounded single-document Q&A
 
 ## /goal
