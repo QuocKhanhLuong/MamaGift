@@ -4,6 +4,15 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
+**Phase 3.5 — Evaluation + Retrieval Foundation**
+
+Status: `COMPLETE` (see the exit-evidence entry at the end of this file)
+
+Phase 3 remains `IN_PROGRESS` — it inherits Phase 1/2's undecided parser strategy —
+and Phase 4 is now `BLOCKED_BY_PHASE_3.5` rather than `BLOCKED_BY_PHASE_3`.
+
+### Previously active phase
+
 **Phase 3 — Document archive and verification-first web UX**
 
 Status: `IN_PROGRESS`
@@ -74,7 +83,8 @@ production parser. Running the private benchmark is what closes both phases.
 | 1 | PDF parser benchmark and parser decision | IN_PROGRESS | Commit `4659fab`; harness, adapters, router, CanonicalDocument v1 and local CI gates complete; ADR-001 `PENDING EVIDENCE` |
 | 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Commit `fc71f8b`; ingestion pipeline, APIs, schema, admin parser and local Phase 2 gates complete; production parser strategy still blocked on ADR-001 |
 | 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`/`c75c489`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
-| 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3 | — |
+| 3.5 | Evaluation + Retrieval Foundation | COMPLETE | see entry below; deterministic foundation only — no embeddings, vector store, reranker, memory backend or LLM |
+| 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3.5 | — |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
 | 7 | Production hardening and low-cost deployment | BLOCKED_BY_PHASE_6 | — |
@@ -324,3 +334,74 @@ ADR-001 Decision section and set it to `ACCEPTED`.
 Phase 3 itself has no unmet exit criterion — the family workflow is demonstrable
 entirely from the browser. What remains is Phase 1/2's parser evidence (see above),
 which is a prerequisite for calling the *product*, not this phase, production-ready.
+
+### Phase 3.5 completed — 2026-08-22
+
+- Commit/PR: merged locally into `main` as the range `b61ef32..d6cfc4d` (50 commits,
+  34 files, +6891/-4). **Not pushed to `origin/main`.** No PR was opened.
+- Test commands: `make check` — **EXIT 0**. Component results inside that run:
+  backend `pytest -q` 657 passed / 1 skipped; the new `make retrieval-eval-tests`
+  gate 229 passed; parser-contract 408 passed / 1 skipped; benchmark smoke 12
+  passed; ingestion-integration 220 passed; admin golden 15 passed; migration 7
+  passed; feedback 14 passed; frontend 38 passed across 9 files; `vite build`
+  succeeded; Compose config validated; Playwright 3/3 passed. `mypy` clean across
+  63 source files, `ruff check` and `ruff format --check` clean, `git diff --check`
+  clean.
+- CI status: **not verified remotely.** The `retrieval-eval-tests` job was added to
+  the `Makefile` and to the `check` target only; it was **not** wired into
+  `.github/workflows/ci.yml`. Do not read this entry as remote CI coverage. Wiring
+  it is carried as a Phase 4 task.
+- ADR/benchmark artifacts: none. No parser or retrieval strategy decision was made.
+
+#### Delivered
+
+- `mamagift_retrieval`: `EvidenceScope` with the fixed authority order, the `Chunk`
+  contract with `validate_chunk_tree`, legal / `Kế hoạch` / fallback chunk builders
+  plus the `build_chunks` orchestrator, a naive lexical baseline seam, and the
+  context/evidence budget contract.
+- `mamagift_eval`: `ParserSemanticCase` / `RetrievalQACase` schemas, the
+  failure-analysis taxonomy, document-type slicing, and per-type/plan metrics.
+- A synthetic nested `Kế hoạch` golden fixture with two tasks carrying distinct
+  owners, coordinating units and deadlines, proven not to cross-associate.
+
+#### How it was verified
+
+Each of the 13 tasks was implemented by one worker and then reviewed by an
+independent agent that read the diff, ran the gates, and mutation-tested the
+guards. **Every one of the 13 per-task reviews returned CHANGES_REQUIRED**, in two
+recurring classes: incomplete version/scope isolation, and tests that passed
+against a deliberately broken implementation. 13 fix commits closed them.
+
+A final whole-diff integration review then found three further BLOCKING defects
+that per-task review structurally could not see, because each was a disagreement
+*between* branches rather than a fault within one:
+
+1. the legal chunker's hardened ID scheme (version-bearing, separator-escaped) was
+   never propagated to the plan and fallback chunkers, which were in flight on
+   their own branches — allowing cross-version ID collisions;
+2. the fallback chunker still built parent IDs in the superseded format, so mixed
+   documents produced unresolvable parent references;
+3. eval metrics inferred the identity to score against from the first input item,
+   so foreign or stale evidence could be credited and inflate every metric.
+
+All three are closed. Chunk-ID construction is now a single shared helper in
+`chunking/_shared.py` that every builder calls, so a future chunker cannot invent
+its own format.
+
+#### Blocking further phases
+
+- Phase 4 has not started and stays `BLOCKED_BY_PHASE_3.5` until deliberately
+  picked up. Nothing in this phase retrieves against a real index, embeds anything,
+  or calls a model.
+- The PP-StructureV3/OCR blocker in `docs/eval/real-pdf-batch-01-results.md` and
+  ADR-001's `PENDING EVIDENCE` status are both unchanged. Phase 3.5 operates only
+  on already-produced `CanonicalDocument`/`ExtractedField` structure and never
+  touches OCR or parsing.
+- Phases 1 and 2 remain `IN_PROGRESS` for that same reason; Phase 3.5 does not
+  close them.
+
+#### Carried into Phase 4
+
+1. Wire `retrieval-eval-tests` into `.github/workflows/ci.yml`.
+2. Resolve the OCR blocker before any claim about real scanned documents; until
+   then every Phase 4 fixture is born-digital or synthetic.
