@@ -23,7 +23,7 @@ from mamagift_retrieval.chunking.fallback import build_fallback_chunks
 pytestmark = pytest.mark.unit
 
 
-def _extracted(name: str, value: str) -> ExtractedField:
+def _extracted(name: str, value: str | None) -> ExtractedField:
     return ExtractedField(
         id=f"field_{name}",
         name=name,
@@ -82,27 +82,53 @@ def _document() -> CanonicalDocument:
 
 def test_claimed_blocks_are_never_re_chunked() -> None:
     chunks = build_fallback_chunks(_document(), claimed_block_ids={"b_1_0000"})
-    assert [chunk.source_block_ids for chunk in chunks] == [["b_1_0001"]]
+    assert len(chunks) == 1
+    assert chunks[0].chunk_id == "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001"
+    assert chunks[0].source_block_ids == ["b_1_0001"]
+    assert chunks[0].source_page_numbers == [1]
+    assert chunks[0].text == "Đoạn văn thứ hai, cũng không có cấu trúc."
+    assert chunks[0].chunk_type == ChunkType.PARAGRAPH
 
 
 def test_furniture_and_empty_blocks_are_skipped() -> None:
     chunks = build_fallback_chunks(_document(), claimed_block_ids=set())
+    assert len(chunks) == 2
+    assert [chunk.source_block_ids for chunk in chunks] == [["b_1_0000"], ["b_1_0001"]]
+    assert [chunk.text for chunk in chunks] == [
+        "Đoạn văn không có cấu trúc rõ ràng.",
+        "Đoạn văn thứ hai, cũng không có cấu trúc.",
+    ]
     block_ids = {chunk.source_block_ids[0] for chunk in chunks}
+    assert block_ids == {"b_1_0000", "b_1_0001"}
     assert "b_1_0002" not in block_ids
     assert "b_1_0003" not in block_ids
 
 
 def test_fallback_chunks_are_paragraph_type() -> None:
     chunks = build_fallback_chunks(_document(), claimed_block_ids=set())
-    assert all(chunk.chunk_type == ChunkType.PARAGRAPH for chunk in chunks)
+    assert len(chunks) == 2
+    assert [chunk.chunk_type for chunk in chunks] == [
+        ChunkType.PARAGRAPH,
+        ChunkType.PARAGRAPH,
+    ]
+    assert [chunk.source_block_ids for chunk in chunks] == [["b_1_0000"], ["b_1_0001"]]
 
 
 def test_fallback_chunking_is_deterministic_across_repeated_builds() -> None:
     document = _document()
-    first = [chunk.chunk_id for chunk in build_fallback_chunks(document, claimed_block_ids=set())]
-    second = [chunk.chunk_id for chunk in build_fallback_chunks(document, claimed_block_ids=set())]
-    assert first == second
-    assert len(first) == len(set(first))
+    first = build_fallback_chunks(document, claimed_block_ids=set())
+    second = build_fallback_chunks(document, claimed_block_ids=set())
+    assert len(first) == 2
+    assert [chunk.chunk_id for chunk in first] == [
+        "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0000",
+        "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001",
+    ]
+    assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
+    assert [chunk.text for chunk in first] == [chunk.text for chunk in second]
+    assert [chunk.source_block_ids for chunk in first] == [
+        chunk.source_block_ids for chunk in second
+    ]
+    assert [chunk.model_dump() for chunk in first] == [chunk.model_dump() for chunk in second]
 
 
 def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
@@ -176,9 +202,24 @@ def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
     assert chunks[0].metadata == {"classified_by": "fallback"}
     assert chunks[0].section_path == []
     assert chunks[0].source_page_numbers == [1]
+    assert chunks[0].source_block_ids == ["b_1_0001"]
+    assert chunks[0].text == "Đoạn văn có parent_id trỏ về Điều 1."
+    assert chunks[0].chunk_type == ChunkType.PARAGRAPH
 
     # Block with custom heading parent has parent_chunk_id as None
+    assert chunks[1].chunk_id == "chunk_doc_fallback_2_run_fallback_2_fallback_b_1_0002"
     assert chunks[1].parent_chunk_id is None
+    assert chunks[1].document_version == 2
+    assert chunks[1].document_type == "QUYẾT ĐỊNH"
+    assert chunks[1].document_number == "01/QĐ-TTg"
+    assert chunks[1].issuer == "Thủ tướng"
+    assert chunks[1].issued_date == "2026-01-01"
+    assert chunks[1].metadata == {"classified_by": "fallback"}
+    assert chunks[1].section_path == []
+    assert chunks[1].source_page_numbers == [1]
+    assert chunks[1].source_block_ids == ["b_1_0002"]
+    assert chunks[1].text == "Đoạn văn trỏ về custom heading."
+    assert chunks[1].chunk_type == ChunkType.PARAGRAPH
 
     article_chunk = Chunk(
         chunk_id="chunk_doc_fallback_2_run_fallback_2_h_art_1",
@@ -191,3 +232,243 @@ def test_fallback_chunks_preserve_metadata_and_parent_chunk_id() -> None:
         source_page_numbers=[1],
     )
     validate_chunk_tree([article_chunk, *chunks])
+
+
+def test_document_with_zero_blocks() -> None:
+    page = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=[])
+    doc = CanonicalDocument(
+        document_id="doc_zero_blocks",
+        parser_run=ParserRun(
+            id="run_zero_1",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[page],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    assert build_fallback_chunks(doc, claimed_block_ids=set()) == []
+
+    doc_empty_pages = CanonicalDocument(
+        document_id="doc_empty_pages",
+        parser_run=ParserRun(
+            id="run_zero_2",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    assert build_fallback_chunks(doc_empty_pages, claimed_block_ids=set()) == []
+
+
+def test_block_with_blank_or_whitespace_text_is_skipped() -> None:
+    blocks = [
+        CanonicalBlock(
+            id="b_blank_1",
+            type=BlockType.PARAGRAPH,
+            text="",
+            reading_order=0,
+            provenance=BlockProvenance(page_number=1),
+        ),
+        CanonicalBlock(
+            id="b_blank_2",
+            type=BlockType.PARAGRAPH,
+            text="   \t\n  ",
+            reading_order=1,
+            provenance=BlockProvenance(page_number=1),
+        ),
+        CanonicalBlock(
+            id="b_valid_1",
+            type=BlockType.PARAGRAPH,
+            text="Nội dung hợp lệ.",
+            reading_order=2,
+            provenance=BlockProvenance(page_number=1),
+        ),
+    ]
+    page = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=blocks)
+    doc = CanonicalDocument(
+        document_id="doc_blank_test",
+        parser_run=ParserRun(
+            id="run_blank_1",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[page],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    chunks = build_fallback_chunks(doc, claimed_block_ids=set())
+    assert len(chunks) == 1
+    assert chunks[0].chunk_id == "chunk_doc_blank_test_run_blank_1_fallback_b_valid_1"
+    assert chunks[0].text == "Nội dung hợp lệ."
+    assert chunks[0].source_block_ids == ["b_valid_1"]
+    assert chunks[0].chunk_type == ChunkType.PARAGRAPH
+
+
+def test_single_block_document() -> None:
+    blocks = [
+        CanonicalBlock(
+            id="b_single_1",
+            type=BlockType.PARAGRAPH,
+            text="Văn bản chỉ có duy nhất một đoạn văn này.",
+            reading_order=0,
+            provenance=BlockProvenance(page_number=1),
+        ),
+    ]
+    page = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=blocks)
+    doc = CanonicalDocument(
+        document_id="doc_single_block",
+        parser_run=ParserRun(
+            id="run_single_1",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[page],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    chunks = build_fallback_chunks(doc, claimed_block_ids=set(), document_version=1)
+    assert len(chunks) == 1
+    assert chunks[0].chunk_id == "chunk_doc_single_block_run_single_1_fallback_b_single_1"
+    assert chunks[0].parent_chunk_id is None
+    assert chunks[0].document_id == "doc_single_block"
+    assert chunks[0].parse_run_id == "run_single_1"
+    assert chunks[0].document_version == 1
+    assert chunks[0].chunk_type == ChunkType.PARAGRAPH
+    assert chunks[0].text == "Văn bản chỉ có duy nhất một đoạn văn này."
+    assert chunks[0].source_block_ids == ["b_single_1"]
+    assert chunks[0].source_page_numbers == [1]
+    assert chunks[0].metadata == {"classified_by": "fallback"}
+    assert chunks[0].section_path == []
+
+
+def test_claimed_block_ids_with_nonexistent_id() -> None:
+    doc = _document()
+    chunks = build_fallback_chunks(
+        doc,
+        claimed_block_ids={"non_existent_block_999", "b_1_0000"},
+    )
+    assert len(chunks) == 1
+    assert chunks[0].chunk_id == "chunk_doc_fallback_1_run_fallback_1_fallback_b_1_0001"
+    assert chunks[0].source_block_ids == ["b_1_0001"]
+    assert chunks[0].source_page_numbers == [1]
+    assert chunks[0].text == "Đoạn văn thứ hai, cũng không có cấu trúc."
+
+
+def test_multi_page_document_preserves_reading_order_and_pages() -> None:
+    page_1_blocks = [
+        CanonicalBlock(
+            id="b_1_0000",
+            type=BlockType.PARAGRAPH,
+            text="Đoạn văn trang 1, khối 0.",
+            reading_order=0,
+            provenance=BlockProvenance(page_number=1),
+        ),
+        CanonicalBlock(
+            id="b_1_0001",
+            type=BlockType.PARAGRAPH,
+            text="Đoạn văn trang 1, khối 1.",
+            reading_order=1,
+            provenance=BlockProvenance(page_number=1),
+        ),
+    ]
+    page_2_blocks = [
+        CanonicalBlock(
+            id="b_2_0000",
+            type=BlockType.PARAGRAPH,
+            text="Đoạn văn trang 2, khối 0.",
+            reading_order=0,
+            provenance=BlockProvenance(page_number=2),
+        ),
+        CanonicalBlock(
+            id="b_2_0001",
+            type=BlockType.PARAGRAPH,
+            text="Đoạn văn trang 2, khối 1.",
+            reading_order=1,
+            provenance=BlockProvenance(page_number=2),
+        ),
+    ]
+    p1 = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=page_1_blocks)
+    p2 = CanonicalPage(page_number=2, width=595.0, height=842.0, blocks=page_2_blocks)
+    doc = CanonicalDocument(
+        document_id="doc_multipage",
+        parser_run=ParserRun(
+            id="run_mp_1",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[p1, p2],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    chunks = build_fallback_chunks(doc, claimed_block_ids={"b_1_0000"}, document_version=3)
+    assert len(chunks) == 3
+    assert [c.chunk_id for c in chunks] == [
+        "chunk_doc_multipage_run_mp_1_fallback_b_1_0001",
+        "chunk_doc_multipage_run_mp_1_fallback_b_2_0000",
+        "chunk_doc_multipage_run_mp_1_fallback_b_2_0001",
+    ]
+    assert [c.source_block_ids for c in chunks] == [["b_1_0001"], ["b_2_0000"], ["b_2_0001"]]
+    assert [c.source_page_numbers for c in chunks] == [[1], [2], [2]]
+    assert [c.text for c in chunks] == [
+        "Đoạn văn trang 1, khối 1.",
+        "Đoạn văn trang 2, khối 0.",
+        "Đoạn văn trang 2, khối 1.",
+    ]
+    assert all(c.document_version == 3 for c in chunks)
+    assert all(c.document_id == "doc_multipage" for c in chunks)
+    assert all(c.parse_run_id == "run_mp_1" for c in chunks)
+
+
+def test_missing_and_none_extracted_fields() -> None:
+    blocks = [
+        CanonicalBlock(
+            id="b_1_0000",
+            type=BlockType.PARAGRAPH,
+            text="Đoạn văn không có metadata.",
+            reading_order=0,
+            provenance=BlockProvenance(page_number=1),
+        ),
+    ]
+    page = CanonicalPage(page_number=1, width=595.0, height=842.0, blocks=blocks)
+    doc = CanonicalDocument(
+        document_id="doc_no_meta",
+        parser_run=ParserRun(
+            id="run_no_meta_1",
+            parser_name="pymupdf",
+            parser_version="1.0",
+            configuration_hash="0" * 16,
+            started_at="2026-01-01T00:00:00+00:00",
+            finished_at="2026-01-01T00:00:01+00:00",
+        ),
+        pages=[page],
+        extracted_fields=[
+            ExtractedField(
+                id="f_doc_num",
+                name="document_number",
+                raw_value=None,
+                normalized_value=None,
+                extractor=Extractor(name="test", version="1.0"),
+            ),
+        ],
+        quality_report=QualityReport(route="born_digital", route_confidence=0.99),
+    )
+    chunks = build_fallback_chunks(doc, claimed_block_ids=set())
+    assert len(chunks) == 1
+    assert chunks[0].document_type is None
+    assert chunks[0].document_number is None
+    assert chunks[0].issuer is None
+    assert chunks[0].issued_date is None
+    assert chunks[0].text == "Đoạn văn không có metadata."

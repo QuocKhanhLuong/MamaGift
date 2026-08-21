@@ -38,7 +38,7 @@ def build_fallback_chunks(
     chunks: list[Chunk] = []
     for page in document.pages:
         for block in sorted(page.blocks, key=lambda item: item.reading_order):
-            if block.id in claimed_block_ids or not block.text.strip():
+            if block.id in claimed_block_ids or not (block.text or "").strip():
                 continue
             if block.type in _SKIP_TYPES:
                 continue
