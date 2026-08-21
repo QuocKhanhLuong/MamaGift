@@ -52,9 +52,9 @@ def validate_chunk_tree(chunks: list[Chunk]) -> None:
     """Structural invariants every chunk set must satisfy regardless of builder.
 
     Raises `ValueError` naming the first violation found: a duplicate `chunk_id`, a
-    `parent_chunk_id` with no matching chunk, or a parent that belongs to a
-    different document/parse run (which would let one document's chunk tree leak
-    into another's).
+    `parent_chunk_id` with no matching chunk, a parent that belongs to a different
+    document/parse run/version (which would let one document's chunk tree leak into
+    another's), a self-parent reference, or a cycle in parent references.
     """
     by_id: dict[str, Chunk] = {}
     for chunk in chunks:
@@ -65,13 +65,39 @@ def validate_chunk_tree(chunks: list[Chunk]) -> None:
     for chunk in chunks:
         if chunk.parent_chunk_id is None:
             continue
+        if chunk.parent_chunk_id == chunk.chunk_id:
+            raise ValueError(
+                f"chunk {chunk.chunk_id!r} cannot be its own parent (self-parent reference)"
+            )
         parent = by_id.get(chunk.parent_chunk_id)
         if parent is None:
             raise ValueError(
                 f"chunk {chunk.chunk_id!r} references unknown parent {chunk.parent_chunk_id!r}"
             )
-        if parent.document_id != chunk.document_id or parent.parse_run_id != chunk.parse_run_id:
+        if parent.document_id != chunk.document_id:
             raise ValueError(
                 f"chunk {chunk.chunk_id!r} parent {parent.chunk_id!r} belongs to a "
-                "different document/parse run"
+                f"different document: {parent.document_id!r} != {chunk.document_id!r}"
             )
+        if parent.parse_run_id != chunk.parse_run_id:
+            raise ValueError(
+                f"chunk {chunk.chunk_id!r} parent {parent.chunk_id!r} belongs to a "
+                f"different parse run: {parent.parse_run_id!r} != {chunk.parse_run_id!r}"
+            )
+        if parent.document_version != chunk.document_version:
+            raise ValueError(
+                f"chunk {chunk.chunk_id!r} parent {parent.chunk_id!r} belongs to a "
+                f"different document version: "
+                f"{parent.document_version!r} != {chunk.document_version!r}"
+            )
+
+    for chunk in chunks:
+        if chunk.parent_chunk_id is None:
+            continue
+        visited: set[str] = {chunk.chunk_id}
+        curr = by_id.get(chunk.parent_chunk_id)
+        while curr is not None and curr.parent_chunk_id is not None:
+            if curr.parent_chunk_id in visited:
+                raise ValueError(f"cycle detected in chunk tree involving chunk {chunk.chunk_id!r}")
+            visited.add(curr.parent_chunk_id)
+            curr = by_id.get(curr.parent_chunk_id)
