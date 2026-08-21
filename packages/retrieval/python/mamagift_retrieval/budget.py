@@ -95,7 +95,16 @@ def assemble_bounded_context(
     usage: list[BudgetCategoryUsage] = []
     for category in _CATEGORIES:
         limit = limits[category]
-        text = offered.get(category, "")
+        raw_text = offered.get(category)
+        if raw_text is None:
+            text = ""
+        elif isinstance(raw_text, str):
+            text = raw_text
+        else:
+            actual_type = type(raw_text).__name__
+            raise TypeError(
+                f"offered text for category {category!r} must be str or None, got {actual_type}"
+            )
         used_text = text[:limit]
         bounded[category] = used_text
         usage.append(
