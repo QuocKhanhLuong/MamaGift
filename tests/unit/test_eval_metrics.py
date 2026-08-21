@@ -63,6 +63,14 @@ _EXPECTED = [
     ExpectedTaskRelation(task_ordinal="2", task_title="B", owner="Owner B", deadline="2026-08-30"),
 ]
 
+_PLAN_CASE = ParserSemanticCase(
+    case_id="c_plan",
+    document_id="doc_1",
+    document_type="ke_hoach",
+    expected_hierarchy_labels=["1. task", "2. task"],
+    expected_task_relations=_EXPECTED,
+)
+
 
 # ===========================================================================
 # 1. task_recall
@@ -113,7 +121,7 @@ def test_task_recall_rejects_foreign_document_id() -> None:
         _task_chunk("t1", "1", document_id="doc_1"),
         _task_chunk("t2", "2", document_id="doc_2"),
     ]
-    assert task_recall(_EXPECTED, chunks) == 0.5
+    assert task_recall(_EXPECTED, chunks, document_id="doc_1") == 0.5
 
 
 def test_task_recall_rejects_foreign_parse_run_id() -> None:
@@ -121,7 +129,7 @@ def test_task_recall_rejects_foreign_parse_run_id() -> None:
         _task_chunk("t1", "1", parse_run_id="run_1"),
         _task_chunk("t2", "2", parse_run_id="run_2"),
     ]
-    assert task_recall(_EXPECTED, chunks) == 0.5
+    assert task_recall(_EXPECTED, chunks, document_id="doc_1", parse_run_id="run_1") == 0.5
 
 
 def test_task_recall_rejects_foreign_document_version() -> None:
@@ -129,7 +137,7 @@ def test_task_recall_rejects_foreign_document_version() -> None:
         _task_chunk("t1", "1", document_version=1),
         _task_chunk("t2", "2", document_version=2),
     ]
-    assert task_recall(_EXPECTED, chunks) == 0.5
+    assert task_recall(_EXPECTED, chunks, document_id="doc_1", document_version=1) == 0.5
 
 
 def test_task_recall_raises_on_duplicate_actual_ordinals() -> None:
@@ -195,7 +203,7 @@ def test_task_order_accuracy_rejects_foreign_chunk() -> None:
         _task_chunk("t1", "1", document_id="doc_1"),
         _task_chunk("t2", "2", document_id="doc_2"),
     ]
-    assert task_order_accuracy(_EXPECTED, chunks) == 0.0
+    assert task_order_accuracy(_EXPECTED, chunks, document_id="doc_1") == 0.0
 
 
 def test_task_order_accuracy_ignores_non_plan_task_chunks() -> None:
@@ -256,7 +264,7 @@ def test_owner_association_rejects_foreign_chunk() -> None:
         _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1"),
         _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_2"),
     ]
-    assert task_owner_association_accuracy(_EXPECTED, chunks) == 0.5
+    assert task_owner_association_accuracy(_EXPECTED, chunks, document_id="doc_1") == 0.5
 
 
 def test_owner_association_ignores_non_plan_task_chunks() -> None:
@@ -316,7 +324,7 @@ def test_deadline_accuracy_rejects_foreign_chunk() -> None:
         _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1"),
         _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_2"),
     ]
-    assert deadline_accuracy(_EXPECTED, chunks) == 0.5
+    assert deadline_accuracy(_EXPECTED, chunks, document_id="doc_1") == 0.5
 
 
 def test_deadline_accuracy_ignores_non_plan_task_chunks() -> None:
@@ -431,7 +439,7 @@ def test_nested_hierarchy_f1_rejects_foreign_document_id() -> None:
     )
     # With foreign chunk rejected: only "A" is valid. Expected: ["A", "B"], Actual: ["A"]
     # TP = 1, Precision = 1/1 = 1.0, Recall = 1/2 = 0.5, F1 = 2 * (1 * 0.5) / 1.5 = 2/3 ≈ 0.6667
-    f1 = nested_hierarchy_f1(["A", "B"], [chunk1, chunk2])
+    f1 = nested_hierarchy_f1(["A", "B"], [chunk1, chunk2], document_id="doc_1")
     assert pytest.approx(f1, rel=1e-3) == 2.0 / 3.0
 
 
@@ -546,7 +554,7 @@ def test_table_appendix_preservation_rejects_foreign_parse_run_id() -> None:
         _appendix_chunk("t1", parse_run_id="run_1", source_block_ids=["b_1_0000"]),
         _appendix_chunk("t2", parse_run_id="run_2", source_block_ids=["b_1_0001"]),
     ]
-    assert table_appendix_preservation(case, chunks) == 0.5
+    assert table_appendix_preservation(case, chunks, parse_run_id="run_1") == 0.5
 
 
 def test_table_appendix_preservation_rejects_foreign_document_version() -> None:
@@ -560,7 +568,7 @@ def test_table_appendix_preservation_rejects_foreign_document_version() -> None:
         _appendix_chunk("t1", document_version=1, source_block_ids=["b_1_0000"]),
         _appendix_chunk("t2", document_version=2, source_block_ids=["b_1_0001"]),
     ]
-    assert table_appendix_preservation(case, chunks) == 0.5
+    assert table_appendix_preservation(case, chunks, document_version=1) == 0.5
 
 
 def test_table_appendix_preservation_rejects_foreign_source_pages() -> None:
@@ -586,3 +594,610 @@ def test_table_appendix_preservation_page_level_when_no_blocks_declared() -> Non
     )
     chunks = [_appendix_chunk("t1", source_page_numbers=[1])]
     assert table_appendix_preservation(case, chunks) == 0.5
+
+
+# ===========================================================================
+# 7. Foreign-First Ordering Attack Tests (Fix for Reviewer BLOCKING Defect)
+# ===========================================================================
+
+
+def test_task_recall_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk(
+        "f1", "1", "Foreign Owner", "2026-08-15", document_id="doc_foreign", parse_run_id="run_f"
+    )
+    v1 = _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_1", parse_run_id="run_1")
+
+    # Foreign first: valid items must still score 1.0 and foreign must not override target
+    assert (
+        task_recall(
+            _EXPECTED,
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    # Foreign only: must score 0.0 (foreign evidence never credited)
+    assert (
+        task_recall(
+            _EXPECTED,
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_task_order_accuracy_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk("f1", "2", document_id="doc_foreign", parse_run_id="run_f")
+    v1 = _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_1", parse_run_id="run_1")
+
+    assert (
+        task_order_accuracy(
+            _EXPECTED,
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_order_accuracy(
+            _EXPECTED,
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_task_owner_association_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk(
+        "f1", "1", owner="Foreign Owner", document_id="doc_foreign", parse_run_id="run_f"
+    )
+    v1 = _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_1", parse_run_id="run_1")
+
+    assert (
+        task_owner_association_accuracy(
+            _EXPECTED,
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_owner_association_accuracy(
+            _EXPECTED,
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_task_deadline_association_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk(
+        "f1", "1", deadline="1999-01-01", document_id="doc_foreign", parse_run_id="run_f"
+    )
+    v1 = _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_1", parse_run_id="run_1")
+
+    assert (
+        task_deadline_association_accuracy(
+            _EXPECTED,
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_deadline_association_accuracy(
+            _EXPECTED,
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_deadline_accuracy_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk(
+        "f1", "1", deadline="1999-01-01", document_id="doc_foreign", parse_run_id="run_f"
+    )
+    v1 = _task_chunk("t1", "1", "Owner A", "2026-08-15", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", "Owner B", "2026-08-30", document_id="doc_1", parse_run_id="run_1")
+
+    assert (
+        deadline_accuracy(
+            _EXPECTED,
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        deadline_accuracy(
+            _EXPECTED,
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_nested_hierarchy_f1_first_item_foreign_not_credited() -> None:
+    foreign = _task_chunk("f1", "Foreign", document_id="doc_foreign", parse_run_id="run_f")
+    v1 = _task_chunk("t1", "1", document_id="doc_1", parse_run_id="run_1")
+    v2 = _task_chunk("t2", "2", document_id="doc_1", parse_run_id="run_1")
+
+    assert (
+        nested_hierarchy_f1(
+            ["1. task", "2. task"],
+            [foreign, v1, v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        nested_hierarchy_f1(
+            ["1. task", "2. task"],
+            [foreign],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+
+def test_table_appendix_preservation_first_item_foreign_or_stale_not_credited() -> None:
+    case = ParserSemanticCase(
+        case_id="c_app_order",
+        document_id="doc_1",
+        document_type="table_appendix",
+        expected_source_block_ids=["b_1_0000", "b_1_0001"],
+    )
+    # Stale version chunk (version 2) placed first with matching block id
+    stale_v2 = _appendix_chunk(
+        "stale",
+        document_id="doc_1",
+        document_version=2,
+        parse_run_id="run_stale",
+        source_block_ids=["b_1_0000"],
+    )
+    valid_v1_1 = _appendix_chunk(
+        "v1_1",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+        source_block_ids=["b_1_0000"],
+    )
+    valid_v1_2 = _appendix_chunk(
+        "v1_2",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+        source_block_ids=["b_1_0001"],
+    )
+
+    # Stale first, valid items present: must score 1.0 (only v1 credited)
+    assert (
+        table_appendix_preservation(
+            case, [stale_v2, valid_v1_1, valid_v1_2], document_version=1, parse_run_id="run_1"
+        )
+        == 1.0
+    )
+    # Stale only: must score 0.0
+    assert (
+        table_appendix_preservation(case, [stale_v2], document_version=1, parse_run_id="run_1")
+        == 0.0
+    )
+
+
+# ===========================================================================
+# 8. Mixed-Provenance Input Tests (Spanning 2 Docs, 2 Versions, 2 Parse Runs)
+# ===========================================================================
+
+
+def test_mixed_provenance_input_spanning_two_docs_versions_and_runs() -> None:
+    valid_1 = _task_chunk(
+        "t1",
+        "1",
+        "Owner A",
+        "2026-08-15",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    valid_2 = _task_chunk(
+        "t2",
+        "2",
+        "Owner B",
+        "2026-08-30",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    foreign_doc = _task_chunk(
+        "f_doc",
+        "1",
+        "Foreign Owner",
+        "1999-01-01",
+        document_id="doc_2",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    stale_ver = _task_chunk(
+        "f_ver",
+        "1",
+        "Stale Owner",
+        "1999-01-01",
+        document_id="doc_1",
+        document_version=2,
+        parse_run_id="run_1",
+    )
+    stale_run = _task_chunk(
+        "f_run",
+        "1",
+        "Stale Run Owner",
+        "1999-01-01",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_2",
+    )
+    foreign_all = _task_chunk(
+        "f_all",
+        "2",
+        "All Foreign",
+        "1999-01-01",
+        document_id="doc_2",
+        document_version=2,
+        parse_run_id="run_2",
+    )
+
+    mixed_pool = [foreign_doc, stale_ver, valid_1, stale_run, foreign_all, valid_2]
+
+    # Target is (doc_1, v1, run_1, ke_hoach)
+    assert (
+        task_recall(
+            _EXPECTED,
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_order_accuracy(
+            _EXPECTED,
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_owner_association_accuracy(
+            _EXPECTED,
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        task_deadline_association_accuracy(
+            _EXPECTED,
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        deadline_accuracy(
+            _EXPECTED,
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+    assert (
+        nested_hierarchy_f1(
+            ["1. task", "2. task"],
+            mixed_pool,
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 1.0
+    )
+
+
+# ===========================================================================
+# 9. Minimal Isolation Guard Tests (ONLY Version or ONLY Parse Run Differs)
+# ===========================================================================
+
+
+def test_isolation_guard_where_only_difference_is_document_version() -> None:
+    # Target identity: doc_1, v1, run_1
+    # Candidate 1: doc_1, v1, run_1 (matches)
+    # Candidate 2: doc_1, v2, run_1 (differs ONLY in document_version)
+    cand_v1 = _task_chunk(
+        "t1",
+        "1",
+        "Owner A",
+        "2026-08-15",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    cand_v2 = _task_chunk(
+        "t2",
+        "2",
+        "Owner B",
+        "2026-08-30",
+        document_id="doc_1",
+        document_version=2,
+        parse_run_id="run_1",
+    )
+
+    # When evaluating for version 1: only cand_v1 matches (1 of 2 expected tasks)
+    assert (
+        task_recall(
+            _EXPECTED,
+            [cand_v1, cand_v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.5
+    )
+    # cand_v2 alone scores 0.0 for version 1
+    assert (
+        task_recall(
+            _EXPECTED,
+            [cand_v2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+    # Hierarchy F1: expected ["1. task", "2. task"].
+    # With cand_v2 rejected: TP=1, FP=0, FN=1 -> F1 = 2/3
+    f1 = nested_hierarchy_f1(
+        ["1. task", "2. task"],
+        [cand_v1, cand_v2],
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    assert pytest.approx(f1, rel=1e-3) == 2.0 / 3.0
+
+    # Table appendix:
+    case = ParserSemanticCase(
+        case_id="c_ver_only",
+        document_id="doc_1",
+        document_type="table_appendix",
+        expected_source_block_ids=["b_1_0000", "b_1_0001"],
+    )
+    app_v1 = _appendix_chunk(
+        "a1",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+        source_block_ids=["b_1_0000"],
+    )
+    app_v2 = _appendix_chunk(
+        "a2",
+        document_id="doc_1",
+        document_version=2,
+        parse_run_id="run_1",
+        source_block_ids=["b_1_0001"],
+    )
+    assert (
+        table_appendix_preservation(
+            case, [app_v1, app_v2], document_version=1, parse_run_id="run_1"
+        )
+        == 0.5
+    )
+    assert (
+        table_appendix_preservation(case, [app_v2], document_version=1, parse_run_id="run_1") == 0.0
+    )
+
+
+def test_isolation_guard_where_only_difference_is_parse_run_id() -> None:
+    # Target identity: doc_1, v1, run_1
+    # Candidate 1: doc_1, v1, run_1 (matches)
+    # Candidate 2: doc_1, v1, run_2 (differs ONLY in parse_run_id)
+    cand_run1 = _task_chunk(
+        "t1",
+        "1",
+        "Owner A",
+        "2026-08-15",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    cand_run2 = _task_chunk(
+        "t2",
+        "2",
+        "Owner B",
+        "2026-08-30",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_2",
+    )
+
+    # When evaluating for run_1: only cand_run1 matches (1 of 2 expected tasks)
+    assert (
+        task_recall(
+            _EXPECTED,
+            [cand_run1, cand_run2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.5
+    )
+    # cand_run2 alone scores 0.0 for run_1
+    assert (
+        task_recall(
+            _EXPECTED,
+            [cand_run2],
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        )
+        == 0.0
+    )
+
+    # Hierarchy F1
+    f1 = nested_hierarchy_f1(
+        ["1. task", "2. task"],
+        [cand_run1, cand_run2],
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+    )
+    assert pytest.approx(f1, rel=1e-3) == 2.0 / 3.0
+
+    # Table appendix:
+    case = ParserSemanticCase(
+        case_id="c_run_only",
+        document_id="doc_1",
+        document_type="table_appendix",
+        expected_source_block_ids=["b_1_0000", "b_1_0001"],
+    )
+    app_run1 = _appendix_chunk(
+        "a1",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_1",
+        source_block_ids=["b_1_0000"],
+    )
+    app_run2 = _appendix_chunk(
+        "a2",
+        document_id="doc_1",
+        document_version=1,
+        parse_run_id="run_2",
+        source_block_ids=["b_1_0001"],
+    )
+    assert (
+        table_appendix_preservation(
+            case, [app_run1, app_run2], document_version=1, parse_run_id="run_1"
+        )
+        == 0.5
+    )
+    assert (
+        table_appendix_preservation(case, [app_run2], document_version=1, parse_run_id="run_1")
+        == 0.0
+    )
+
+
+# ===========================================================================
+# 10. Direct ParserSemanticCase Parameter Passing
+# ===========================================================================
+
+
+def test_metrics_accept_parser_semantic_case_directly() -> None:
+    chunks = [
+        _task_chunk(
+            "t1",
+            "1",
+            "Owner A",
+            "2026-08-15",
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        ),
+        _task_chunk(
+            "t2",
+            "2",
+            "Owner B",
+            "2026-08-30",
+            document_id="doc_1",
+            document_version=1,
+            parse_run_id="run_1",
+        ),
+    ]
+
+    assert task_recall(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+    assert task_order_accuracy(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+    assert task_owner_association_accuracy(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+    assert task_deadline_association_accuracy(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+    assert deadline_accuracy(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+    assert nested_hierarchy_f1(_PLAN_CASE, chunks, parse_run_id="run_1") == 1.0
+
+
+# ===========================================================================
+# 11. Unspecified Target Identity with Mixed Provenance Raises ValueError
+# ===========================================================================
+
+
+def test_unspecified_target_identity_with_mixed_documents_raises_value_error() -> None:
+    mixed_docs = [
+        _task_chunk("t1", "1", document_id="doc_1"),
+        _task_chunk("t2", "2", document_id="doc_2"),
+    ]
+    with pytest.raises(ValueError, match="mixed document_id in actual chunks"):
+        task_recall(_EXPECTED, mixed_docs)
+
+    with pytest.raises(ValueError, match="mixed document_id in actual chunks"):
+        nested_hierarchy_f1(["1. task", "2. task"], mixed_docs)
+
+
+def test_unspecified_parse_run_with_mixed_runs_raises_value_error() -> None:
+    mixed_runs = [
+        _task_chunk("t1", "1", document_id="doc_1", parse_run_id="run_1"),
+        _task_chunk("t2", "2", document_id="doc_1", parse_run_id="run_2"),
+    ]
+    with pytest.raises(ValueError, match="mixed parse_run_id in actual chunks"):
+        task_recall(_EXPECTED, mixed_runs, document_id="doc_1")
+
+    with pytest.raises(ValueError, match="mixed parse_run_id in actual chunks"):
+        nested_hierarchy_f1(["1. task", "2. task"], mixed_runs, document_id="doc_1")
+
+    case = ParserSemanticCase(
+        case_id="c_app_mixed",
+        document_id="doc_1",
+        document_type="table_appendix",
+        expected_source_block_ids=["b1"],
+    )
+    app_runs = [
+        _appendix_chunk("a1", document_id="doc_1", parse_run_id="run_1"),
+        _appendix_chunk("a2", document_id="doc_1", parse_run_id="run_2"),
+    ]
+    with pytest.raises(ValueError, match="mixed parse_run_id in actual chunks"):
+        table_appendix_preservation(case, app_runs)
