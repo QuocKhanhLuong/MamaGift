@@ -6,6 +6,7 @@ reranker are implemented here (docs/09_CODEX_EXECUTION.md non-goals for this pha
 
 from .budget import BudgetBreakdown, BudgetCategoryUsage, EvidenceBudget, assemble_bounded_context
 from .chunk import Chunk, ChunkType, validate_chunk_tree
+from .chunking import build_chunks, build_fallback_chunks, build_legal_chunks, build_plan_chunks
 from .lexical import LexicalHit, LexicalIndex, RetrievalBaseline
 from .scope import EvidenceScope, EvidenceSource, authority_rank, resolve_conflict, scope_matches
 
@@ -22,6 +23,10 @@ __all__ = [
     "RetrievalBaseline",
     "assemble_bounded_context",
     "authority_rank",
+    "build_chunks",
+    "build_fallback_chunks",
+    "build_legal_chunks",
+    "build_plan_chunks",
     "resolve_conflict",
     "scope_matches",
     "validate_chunk_tree",
