@@ -4,12 +4,16 @@ context/evidence budget contract. No embeddings, vector store, memory backend or
 reranker are implemented here (docs/09_CODEX_EXECUTION.md non-goals for this phase).
 """
 
+from .chunk import Chunk, ChunkType, validate_chunk_tree
 from .scope import EvidenceScope, EvidenceSource, authority_rank, resolve_conflict, scope_matches
 
 __all__ = [
+    "Chunk",
+    "ChunkType",
     "EvidenceScope",
     "EvidenceSource",
     "authority_rank",
     "resolve_conflict",
     "scope_matches",
+    "validate_chunk_tree",
 ]
