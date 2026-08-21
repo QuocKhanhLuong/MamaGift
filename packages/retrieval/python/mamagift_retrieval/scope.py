@@ -75,24 +75,24 @@ class EvidenceScope(BaseModel):
 def scope_matches(candidate: EvidenceScope, allowed: EvidenceScope) -> bool:
     """Whether `candidate` evidence may be used to answer a request scoped to `allowed`.
 
-    A leak is any candidate whose family/document/version does not match the allowed
+    A leak is any candidate whose family/document/version/parse-run does not match the allowed
     scope. `archive_scope=True` on `allowed` permits any document within the family;
     otherwise the candidate must name the same `document_id` (and, when the caller
-    pinned a version, the same `document_version`).
+    pinned a version or parse-run, the exact same `document_version` and `parse_run_id`).
     """
     if candidate.family_id != allowed.family_id:
         return False
     if allowed.user_id is not None and candidate.user_id not in (None, allowed.user_id):
         return False
-    if allowed.archive_scope:
-        return True
-    if allowed.document_id is None:
-        return True
-    if candidate.document_id != allowed.document_id:
+    if allowed.thread_id is not None and candidate.thread_id not in (None, allowed.thread_id):
         return False
-    if allowed.document_version is not None and candidate.document_version not in (
-        None,
-        allowed.document_version,
+    if not allowed.archive_scope and candidate.document_id != allowed.document_id:
+        return False
+    if (
+        allowed.document_version is not None
+        and candidate.document_version != allowed.document_version
     ):
+        return False
+    if allowed.parse_run_id is not None and candidate.parse_run_id != allowed.parse_run_id:
         return False
     return True
