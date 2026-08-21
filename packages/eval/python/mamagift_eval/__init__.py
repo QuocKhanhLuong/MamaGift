@@ -4,9 +4,13 @@ LLM evaluator or RAGAS integration is implemented here.
 """
 
 from .schemas import ExpectedTaskRelation, ParserSemanticCase, RetrievalQACase
+from .taxonomy import FailureDiagnosis, FailureLabel, classify_failure
 
 __all__ = [
     "ExpectedTaskRelation",
+    "FailureDiagnosis",
+    "FailureLabel",
     "ParserSemanticCase",
     "RetrievalQACase",
+    "classify_failure",
 ]
