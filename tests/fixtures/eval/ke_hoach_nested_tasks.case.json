@@ -1,0 +1,35 @@
+{
+  "case_id": "ke_hoach_nested_tasks_01",
+  "document_id": "doc_ke_hoach_nested_tasks_01",
+  "document_type": "ke_hoach",
+  "expected_critical_fields": {
+    "document_type": "ke_hoach",
+    "document_number": "12/KH-UBND"
+  },
+  "expected_hierarchy_labels": [
+    "I. MỤC ĐÍCH, YÊU CẦU",
+    "II. NỘI DUNG THỰC HIỆN",
+    "1. Rà soát danh sách học sinh trong độ tuổi tuyển sinh",
+    "2. Tổ chức tiếp nhận hồ sơ tuyển sinh trực tuyến"
+  ],
+  "expected_task_relations": [
+    {
+      "task_ordinal": "1",
+      "task_title": "Rà soát danh sách học sinh trong độ tuổi tuyển sinh",
+      "owner": "Phòng Giáo dục và Đào tạo",
+      "coordinating_unit": "Ủy ban nhân dân các xã, phường",
+      "deadline": "2026-08-15"
+    },
+    {
+      "task_ordinal": "2",
+      "task_title": "Tổ chức tiếp nhận hồ sơ tuyển sinh trực tuyến",
+      "owner": "Trường Tiểu học Mai Giang",
+      "coordinating_unit": "Phòng Giáo dục và Đào tạo",
+      "deadline": "2026-08-30"
+    }
+  ],
+  "expected_source_block_ids": [],
+  "expected_source_page_numbers": [
+    1
+  ]
+}
