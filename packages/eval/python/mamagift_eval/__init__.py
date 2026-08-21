@@ -3,10 +3,29 @@ document-type slicing, per-type/plan metrics and the failure-analysis taxonomy. 
 LLM evaluator or RAGAS integration is implemented here.
 """
 
+from .document_types import DOCUMENT_TYPE_SLICES, slice_by_document_type
+from .metrics import (
+    deadline_accuracy,
+    nested_hierarchy_f1,
+    table_appendix_preservation,
+    task_deadline_association_accuracy,
+    task_order_accuracy,
+    task_owner_association_accuracy,
+    task_recall,
+)
 from .schemas import ExpectedTaskRelation, ParserSemanticCase, RetrievalQACase
 
 __all__ = [
+    "DOCUMENT_TYPE_SLICES",
     "ExpectedTaskRelation",
     "ParserSemanticCase",
     "RetrievalQACase",
+    "deadline_accuracy",
+    "nested_hierarchy_f1",
+    "slice_by_document_type",
+    "table_appendix_preservation",
+    "task_deadline_association_accuracy",
+    "task_order_accuracy",
+    "task_owner_association_accuracy",
+    "task_recall",
 ]
