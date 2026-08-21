@@ -5,6 +5,7 @@ reranker are implemented here (docs/09_CODEX_EXECUTION.md non-goals for this pha
 """
 
 from .chunk import Chunk, ChunkType, validate_chunk_tree
+from .lexical import LexicalHit, LexicalIndex, RetrievalBaseline
 from .scope import EvidenceScope, EvidenceSource, authority_rank, resolve_conflict, scope_matches
 
 __all__ = [
@@ -12,6 +13,9 @@ __all__ = [
     "ChunkType",
     "EvidenceScope",
     "EvidenceSource",
+    "LexicalHit",
+    "LexicalIndex",
+    "RetrievalBaseline",
     "authority_rank",
     "resolve_conflict",
     "scope_matches",
