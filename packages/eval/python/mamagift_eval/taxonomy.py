@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 _UPSTREAM_STAGES = frozenset(
     {
@@ -41,7 +41,7 @@ class FailureLabel(StrEnum):
 class FailureDiagnosis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    case_id: str
+    case_id: str = Field(min_length=1)
     answer_or_fact_correct: bool
     evidence_present: bool
     label: FailureLabel
