@@ -16,6 +16,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -69,7 +70,10 @@ class Document(Base):
         back_populates="document", cascade="all, delete-orphan"
     )
     document_chunks: Mapped[list[DocumentChunk]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
+        back_populates="document",
+        cascade="all, delete-orphan",
+        foreign_keys="[DocumentChunk.document_id]",
+        overlaps="document_chunks,parse_run",
     )
 
 
@@ -111,7 +115,10 @@ class ParseRun(Base):
     """One immutable attempt at turning the original bytes into a canonical document."""
 
     __tablename__ = "parse_runs"
-    __table_args__ = (UniqueConstraint("document_id", "version", name="uq_parse_runs_version"),)
+    __table_args__ = (
+        UniqueConstraint("document_id", "version", name="uq_parse_runs_version"),
+        UniqueConstraint("id", "document_id", "version", name="uq_parse_runs_identity"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     document_id: Mapped[str] = mapped_column(
@@ -141,6 +148,16 @@ class ParseRun(Base):
     )
 
     document: Mapped[Document] = relationship(back_populates="parse_runs")
+    document_chunks: Mapped[list[DocumentChunk]] = relationship(
+        back_populates="parse_run",
+        cascade="all, delete-orphan",
+        foreign_keys=(
+            "[DocumentChunk.parse_run_id, "
+            "DocumentChunk.document_id, "
+            "DocumentChunk.document_version]"
+        ),
+        overlaps="document_chunks,document",
+    )
 
 
 class FeedbackEvent(Base):
@@ -177,6 +194,12 @@ class DocumentChunk(Base):
 
     __tablename__ = "document_chunks"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["parse_run_id", "document_id", "document_version"],
+            ["parse_runs.id", "parse_runs.document_id", "parse_runs.version"],
+            ondelete="CASCADE",
+            name="fk_document_chunks_parse_run_provenance",
+        ),
         UniqueConstraint(
             "parse_run_id", "chunk_index", name="uq_document_chunks_parse_run_chunk_index"
         ),
@@ -206,4 +229,13 @@ class DocumentChunk(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    document: Mapped[Document] = relationship(back_populates="document_chunks")
+    document: Mapped[Document] = relationship(
+        back_populates="document_chunks",
+        foreign_keys=[document_id],
+        overlaps="document_chunks,parse_run",
+    )
+    parse_run: Mapped[ParseRun] = relationship(
+        back_populates="document_chunks",
+        foreign_keys=[parse_run_id, document_id, document_version],
+        overlaps="document,document_chunks",
+    )

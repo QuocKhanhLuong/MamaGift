@@ -13,6 +13,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "sqlite":
+        op.create_index(
+            "uq_parse_runs_identity",
+            "parse_runs",
+            ["id", "document_id", "version"],
+            unique=True,
+        )
+    else:
+        op.create_unique_constraint(
+            "uq_parse_runs_identity",
+            "parse_runs",
+            ["id", "document_id", "version"],
+        )
+
     op.create_table(
         "document_chunks",
         sa.Column("id", sa.String(length=256), primary_key=True),
@@ -40,6 +54,12 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("CURRENT_TIMESTAMP"),
         ),
+        sa.ForeignKeyConstraint(
+            ["parse_run_id", "document_id", "document_version"],
+            ["parse_runs.id", "parse_runs.document_id", "parse_runs.version"],
+            ondelete="CASCADE",
+            name="fk_document_chunks_parse_run_provenance",
+        ),
         sa.UniqueConstraint(
             "parse_run_id", "chunk_index", name="uq_document_chunks_parse_run_chunk_index"
         ),
@@ -54,3 +74,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_document_chunks_document_id_parse_run_id", table_name="document_chunks")
     op.drop_table("document_chunks")
+    if op.get_bind().dialect.name == "sqlite":
+        op.drop_index("uq_parse_runs_identity", table_name="parse_runs")
+    else:
+        op.drop_constraint("uq_parse_runs_identity", "parse_runs", type_="unique")
