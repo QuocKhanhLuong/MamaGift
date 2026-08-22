@@ -1,4 +1,4 @@
-"""Contract tests for AI worker health, DTO schemas, and OpenAI response adapter."""
+"""Contract tests for AI worker health, settings, and DTO schemas."""
 
 from __future__ import annotations
 
@@ -50,6 +50,25 @@ create_app: Callable[..., FastAPI] = _main_mod.create_app
 AUTH_HEADER = {"Authorization": "Bearer local-fake-worker-token"}
 
 
+def test_default_contract_worker_reports_offline_and_no_capabilities() -> None:
+    """Default contract worker without backing models reports offline and no capabilities."""
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/internal/v1/health", headers=AUTH_HEADER)
+    assert response.status_code == 200
+    payload = response.json()
+
+    health = WorkerHealth.model_validate(payload)
+    assert health.status == "offline"
+    assert health.worker_version == "0.4.0"
+    assert health.capabilities.parse is False
+    assert health.capabilities.embed is False
+    assert health.capabilities.rerank is False
+    assert health.capabilities.llm is False
+    assert health.models == {}
+
+
 def test_health_contract_online() -> None:
     settings = WorkerSettings(
         worker_version="0.4.0",
@@ -93,10 +112,23 @@ def test_health_contract_offline() -> None:
     assert response.status_code == 200
     health = WorkerHealth.model_validate(response.json())
     assert health.status == "offline"
+    assert health.capabilities.parse is False
+    assert health.capabilities.embed is False
+    assert health.capabilities.rerank is False
+    assert health.capabilities.llm is False
+    assert health.models == {}
 
 
 def test_health_contract_degraded() -> None:
-    settings = WorkerSettings(status="degraded")
+    settings = WorkerSettings(
+        status="degraded",
+        capability_parse=True,
+        capability_embed=True,
+        capability_rerank=False,
+        capability_llm=False,
+        model_embedding="bge-m3",
+        model_ocr="pp-structure-v3",
+    )
     app = create_app(settings)
     client = TestClient(app)
 
@@ -104,6 +136,19 @@ def test_health_contract_degraded() -> None:
     assert response.status_code == 200
     health = WorkerHealth.model_validate(response.json())
     assert health.status == "degraded"
+    assert health.capabilities.parse is True
+    assert health.capabilities.embed is True
+    assert health.capabilities.rerank is False
+    assert health.capabilities.llm is False
+    assert health.models == {
+        "embedding": "bge-m3",
+        "ocr": "pp-structure-v3",
+    }
+
+
+def test_worker_settings_forbids_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        WorkerSettings(unknown_setting_key="disallowed")
 
 
 def test_health_contract_forbids_extra_fields() -> None:
@@ -176,6 +221,9 @@ def test_llm_contract_schemas() -> None:
     with pytest.raises(ValidationError):
         ChatMessage.model_validate({"role": "invalid_role", "content": "hello"})
 
+    with pytest.raises(ValidationError):
+        ChatMessage.model_validate({"role": "user", "content": "hello", "extra_key": "bad"})
+
     req = CompletionRequest(
         messages=[msg],
         max_output_tokens=256,
@@ -187,6 +235,15 @@ def test_llm_contract_schemas() -> None:
     assert req.temperature == 0.7
     assert req.stop == ["\n\n"]
     assert req.response_format == "json_object"
+
+    with pytest.raises(ValidationError):
+        CompletionRequest.model_validate(
+            {
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_output_tokens": 256,
+                "unknown_param": 42,
+            }
+        )
 
     res = CompletionResult(
         text="Kết quả",
@@ -201,11 +258,45 @@ def test_llm_contract_schemas() -> None:
     assert res.usage.completion_tokens == 5
     assert res.usage.total_tokens == 15
 
+    with pytest.raises(ValidationError):
+        CompletionResult.model_validate(
+            {
+                "text": "hi",
+                "model": "m",
+                "provider": "p",
+                "finish_reason": "invalid_reason",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        CompletionResult.model_validate(
+            {
+                "text": "hi",
+                "model": "m",
+                "provider": "p",
+                "finish_reason": "stop",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "extra": "bad",
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        TokenUsage.model_validate(
+            {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "extra": "bad"}
+        )
+
 
 def test_rerank_contract_schemas() -> None:
     item = RerankItem(index=0, score=0.95, text="Đoạn văn 1")
     assert item.index == 0
     assert item.score == 0.95
+
+    with pytest.raises(ValidationError):
+        RerankItem.model_validate({"index": -1, "score": 0.95, "text": "Đoạn văn 1"})
+
+    with pytest.raises(ValidationError):
+        RerankItem.model_validate({"index": 0, "score": 0.95, "text": "t", "extra": "bad"})
 
     req = RerankRequest(
         query="Nhiệm vụ chủ trì",
@@ -217,6 +308,17 @@ def test_rerank_contract_schemas() -> None:
     assert len(req.documents) == 2
     assert req.top_k == 5
 
+    with pytest.raises(ValidationError):
+        RerankRequest.model_validate(
+            {
+                "query": "q",
+                "documents": ["d1"],
+                "top_k": 1,
+                "model": "m",
+                "extra": "bad",
+            }
+        )
+
     res = RerankResult(
         results=[item],
         model="bge-reranker-large",
@@ -225,74 +327,12 @@ def test_rerank_contract_schemas() -> None:
     assert len(res.results) == 1
     assert res.results[0].score == 0.95
 
-
-def adapt_openai_chat_response(
-    raw: dict[str, Any], provider: str = "local-openai-compatible"
-) -> CompletionResult:
-    """Helper adapter converting OpenAI chat completion JSON payload to CompletionResult."""
-    choice = raw["choices"][0]
-    message_content = choice["message"]["content"]
-    finish_reason = choice.get("finish_reason", "stop")
-    model = raw.get("model", "unknown")
-    raw_usage = raw.get("usage", {})
-    usage = TokenUsage(
-        prompt_tokens=raw_usage.get("prompt_tokens", 0),
-        completion_tokens=raw_usage.get("completion_tokens", 0),
-        total_tokens=raw_usage.get("total_tokens", 0),
-    )
-    return CompletionResult(
-        text=message_content,
-        model=model,
-        provider=provider,
-        finish_reason=finish_reason,
-        usage=usage,
-    )
-
-
-def test_openai_compatible_response_adapter_shape() -> None:
-    raw_openai_payload = {
-        "id": "chatcmpl-abc123xyz",
-        "object": "chat.completion",
-        "created": 1724284800,
-        "model": "qwen2.5-7b-instruct",
-        "choices": [
+    with pytest.raises(ValidationError):
+        RerankResult.model_validate(
             {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Căn cứ Quyết định số 12/QĐ-UBND...",
-                },
-                "finish_reason": "stop",
+                "results": [{"index": 0, "score": 0.95, "text": "t"}],
+                "model": "m",
+                "reranker_version": "v1",
+                "extra": "bad",
             }
-        ],
-        "usage": {
-            "prompt_tokens": 142,
-            "completion_tokens": 58,
-            "total_tokens": 200,
-        },
-    }
-
-    adapted = adapt_openai_chat_response(raw_openai_payload)
-    assert adapted.text == "Căn cứ Quyết định số 12/QĐ-UBND..."
-    assert adapted.model == "qwen2.5-7b-instruct"
-    assert adapted.provider == "local-openai-compatible"
-    assert adapted.finish_reason == "stop"
-    assert adapted.usage.prompt_tokens == 142
-    assert adapted.usage.completion_tokens == 58
-    assert adapted.usage.total_tokens == 200
-
-
-def test_retry_safe_idempotent_request() -> None:
-    app = create_app()
-    client = TestClient(app)
-
-    request_id = "req_custom_idempotent_12345"
-    headers = {**AUTH_HEADER, "x-request-id": request_id}
-
-    response_1 = client.get("/internal/v1/health", headers=headers)
-    assert response_1.status_code == 200
-
-    response_2 = client.get("/internal/v1/health", headers=headers)
-    assert response_2.status_code == 200
-
-    assert response_1.json() == response_2.json()
+        )

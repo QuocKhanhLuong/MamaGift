@@ -14,24 +14,24 @@ class WorkerSettings(BaseSettings):
     worker_host: str = "0.0.0.0"
     worker_port: int = 8090
     auth_token: str = "local-fake-worker-token"
-    status: Literal["online", "offline", "degraded"] = "online"
+    status: Literal["online", "offline", "degraded"] = "offline"
     timeout_seconds: float = 30.0
 
-    # Capabilities
-    capability_parse: bool = True
-    capability_embed: bool = True
+    # Capabilities (contract-only worker defaults to False)
+    capability_parse: bool = False
+    capability_embed: bool = False
     capability_rerank: bool = False
-    capability_llm: bool = True
+    capability_llm: bool = False
 
-    # Model identifiers
-    model_llm: str = "qwen2.5-7b-instruct"
-    model_embedding: str = "bge-m3"
-    model_ocr: str = "pp-structure-v3"
+    # Model identifiers (empty by default when no backing model is loaded)
+    model_llm: str = ""
+    model_embedding: str = ""
+    model_ocr: str = ""
 
     model_config = SettingsConfigDict(
         env_file=(".env",),
         env_file_encoding="utf-8",
-        extra="ignore",
+        extra="forbid",
     )
 
 

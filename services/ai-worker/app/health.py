@@ -20,6 +20,14 @@ async def get_health(
     settings: Annotated[WorkerSettings, Depends(get_worker_settings)],
 ) -> WorkerHealth:
     """Return worker status, capabilities, and loaded models."""
+    models: dict[str, str] = {}
+    if settings.model_llm:
+        models["llm"] = settings.model_llm
+    if settings.model_embedding:
+        models["embedding"] = settings.model_embedding
+    if settings.model_ocr:
+        models["ocr"] = settings.model_ocr
+
     return WorkerHealth(
         status=settings.status,
         worker_version=settings.worker_version,
@@ -29,9 +37,5 @@ async def get_health(
             rerank=settings.capability_rerank,
             llm=settings.capability_llm,
         ),
-        models={
-            "llm": settings.model_llm,
-            "embedding": settings.model_embedding,
-            "ocr": settings.model_ocr,
-        },
+        models=models,
     )
