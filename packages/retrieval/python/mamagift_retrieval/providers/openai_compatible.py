@@ -6,6 +6,7 @@ import asyncio
 from typing import Any, Literal
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mamagift_contracts.errors import (
     WorkerError,
@@ -16,6 +17,62 @@ from mamagift_contracts.llm import (
     CompletionResult,
     TokenUsage,
 )
+
+_LOCAL_RETRYABLE_BY_CODE: dict[WorkerErrorCode, bool] = {
+    WorkerErrorCode.UNAUTHORIZED: False,
+    WorkerErrorCode.BAD_REQUEST: False,
+    WorkerErrorCode.TIMEOUT: True,
+    WorkerErrorCode.UNAVAILABLE: True,
+    WorkerErrorCode.MODEL_NOT_LOADED: True,
+    WorkerErrorCode.UPSTREAM_ERROR: True,
+}
+
+
+class OpenAIMessagePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: str | None = None
+    content: str
+    refusal: str | None = None
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("message content must be a non-empty string")
+        return v
+
+
+class OpenAIChoicePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int | None = None
+    message: OpenAIMessagePayload
+    finish_reason: Literal["stop", "length", "content_filter", "error"]
+    logprobs: Any | None = None
+
+
+class OpenAIUsagePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    prompt_tokens_details: Any | None = None
+    completion_tokens_details: Any | None = None
+
+
+class OpenAIChatCompletionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    object: str | None = None
+    created: int | None = None
+    model: str | None = None
+    choices: list[OpenAIChoicePayload] = Field(min_length=1)
+    usage: OpenAIUsagePayload | None = None
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
 
 
 def _build_chat_endpoint(base_url: str) -> str:
@@ -103,21 +160,34 @@ class OpenAICompatibleChatProvider:
         if error_json and "error" in error_json and isinstance(error_json["error"], dict):
             err_dict = error_json["error"]
             if "code" in err_dict and "message" in err_dict:
-                try:
-                    code_enum = WorkerErrorCode(err_dict["code"])
-                except ValueError:
-                    code_enum = WorkerErrorCode.UPSTREAM_ERROR
-                retryable = bool(err_dict.get("retryable", False))
-                details = err_dict.get("details", {})
-                if not isinstance(details, dict):
-                    details = {}
-                raise WorkerError(
-                    code=code_enum,
-                    message=str(err_dict["message"]),
-                    retryable=retryable,
-                    status_code=status,
-                    details=details,
-                )
+                raw_code = err_dict.get("code")
+                code_enum: WorkerErrorCode | None = None
+                if isinstance(raw_code, str):
+                    try:
+                        code_enum = WorkerErrorCode(raw_code)
+                    except ValueError:
+                        code_enum = None
+
+                if code_enum is not None:
+                    # Retryability is determined by our local policy.
+                    # Upstream hint is advisory: it may narrow retrying, never widen it.
+                    local_retryable = _LOCAL_RETRYABLE_BY_CODE.get(code_enum, False)
+                    upstream_hint = err_dict.get("retryable")
+                    if upstream_hint is not None:
+                        retryable = local_retryable and bool(upstream_hint)
+                    else:
+                        retryable = local_retryable
+
+                    details = err_dict.get("details", {})
+                    if not isinstance(details, dict):
+                        details = {}
+                    raise WorkerError(
+                        code=code_enum,
+                        message=str(err_dict["message"]),
+                        retryable=retryable,
+                        status_code=status,
+                        details=details,
+                    )
 
         # Upstream OpenAI/Ollama error payload
         err_msg = ""
@@ -201,54 +271,26 @@ class OpenAICompatibleChatProvider:
                 status_code=502,
             )
 
-        choices = data.get("choices")
-        if not isinstance(choices, list) or len(choices) == 0:
+        try:
+            parsed = OpenAIChatCompletionResponse.model_validate(data)
+        except Exception as exc:
             raise WorkerError(
                 WorkerErrorCode.UPSTREAM_ERROR,
-                "Invalid LLM response: missing or empty 'choices' list",
+                f"Invalid LLM response payload: {exc}",
                 retryable=True,
                 status_code=502,
+            ) from exc
+
+        first_choice = parsed.choices[0]
+        parsed_usage = parsed.usage
+        if parsed_usage is not None:
+            prompt_tokens = parsed_usage.prompt_tokens
+            completion_tokens = parsed_usage.completion_tokens
+            total_tokens = (
+                parsed_usage.total_tokens
+                if parsed_usage.total_tokens > 0
+                else (prompt_tokens + completion_tokens)
             )
-
-        first_choice = choices[0]
-        if not isinstance(first_choice, dict):
-            raise WorkerError(
-                WorkerErrorCode.UPSTREAM_ERROR,
-                "Invalid LLM response: choice item must be an object",
-                retryable=True,
-                status_code=502,
-            )
-
-        message = first_choice.get("message")
-        if not isinstance(message, dict):
-            raise WorkerError(
-                WorkerErrorCode.UPSTREAM_ERROR,
-                "Invalid LLM response: missing or invalid 'message' object in choice",
-                retryable=True,
-                status_code=502,
-            )
-
-        content = message.get("content")
-        if content is None or not isinstance(content, str):
-            raise WorkerError(
-                WorkerErrorCode.UPSTREAM_ERROR,
-                "Invalid LLM response: missing or non-string 'content' in message",
-                retryable=True,
-                status_code=502,
-            )
-
-        raw_finish_reason = first_choice.get("finish_reason")
-        finish_reason: Literal["stop", "length", "content_filter", "error"]
-        if raw_finish_reason in ("stop", "length", "content_filter", "error"):
-            finish_reason = raw_finish_reason
-        else:
-            finish_reason = "stop"
-
-        raw_usage = data.get("usage")
-        if isinstance(raw_usage, dict):
-            prompt_tokens = int(raw_usage.get("prompt_tokens") or 0)
-            completion_tokens = int(raw_usage.get("completion_tokens") or 0)
-            total_tokens = int(raw_usage.get("total_tokens") or (prompt_tokens + completion_tokens))
         else:
             prompt_tokens = 0
             completion_tokens = 0
@@ -260,13 +302,13 @@ class OpenAICompatibleChatProvider:
             total_tokens=total_tokens,
         )
 
-        model_name = str(data.get("model") or self.model)
+        model_name = parsed.model or self.model
 
         return CompletionResult(
-            text=content,
+            text=first_choice.message.content,
             model=model_name,
             provider=self.provider_name,
-            finish_reason=finish_reason,
+            finish_reason=first_choice.finish_reason,
             usage=usage,
         )
 

@@ -292,10 +292,118 @@ class TestOpenAICompatibleResponseParsing:
             {"choices": [{"message": {}}]},  # Missing content
             {"choices": [{"message": {"content": None}}]},  # Content is None
             {"choices": [{"message": {"content": 12345}}]},  # Content is not string
+            {"choices": [{"message": {"content": ""}, "finish_reason": "stop"}]},  # Empty content
+            {
+                "choices": [{"message": {"content": "   "}, "finish_reason": "stop"}]
+            },  # Whitespace content
+            {"choices": [{"message": {"content": "Valid answer"}}]},  # Missing finish_reason
+            {
+                "choices": [{"message": {"content": "Valid answer"}, "finish_reason": None}]
+            },  # None finish_reason
+            {
+                "choices": [
+                    {"message": {"content": "Valid answer"}, "finish_reason": "unknown_reason"}
+                ]
+            },  # Unknown finish_reason
+            {
+                "extra_field": "invalid",
+                "choices": [{"message": {"content": "Valid"}, "finish_reason": "stop"}],
+            },  # Extra root field
+            {
+                "choices": [
+                    {"message": {"content": "Valid"}, "finish_reason": "stop", "extra_choice": 123}
+                ]
+            },  # Extra choice field
+            {
+                "choices": [
+                    {"message": {"content": "Valid", "extra_msg": "no"}, "finish_reason": "stop"}
+                ]
+            },  # Extra message field
+            {
+                "choices": [{"message": {"content": "Valid"}, "finish_reason": "stop"}],
+                "usage": {"extra_usage": 1},
+            },  # Extra usage field
         ],
     )
     def test_malformed_json_structure_fails_loudly(self, invalid_json: Any) -> None:
         transport = httpx.MockTransport(lambda req: _create_mock_response(json_data=invalid_json))
+        client = httpx.AsyncClient(transport=transport)
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="test-model",
+            max_retries=0,
+            http_client=client,
+        )
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+        assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+        assert exc_info.value.status_code == 502
+
+    def test_empty_content_in_successful_response_fails_loudly(self) -> None:
+        mock_data = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+        transport = httpx.MockTransport(lambda req: _create_mock_response(json_data=mock_data))
+        client = httpx.AsyncClient(transport=transport)
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="test-model",
+            max_retries=0,
+            http_client=client,
+        )
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+        assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+        assert exc_info.value.status_code == 502
+
+    def test_unknown_finish_reason_fails_loudly_without_coercion(self) -> None:
+        mock_data = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Valid text",
+                    },
+                    "finish_reason": "invalid_custom_finish_reason",
+                }
+            ]
+        }
+        transport = httpx.MockTransport(lambda req: _create_mock_response(json_data=mock_data))
+        client = httpx.AsyncClient(transport=transport)
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="test-model",
+            max_retries=0,
+            http_client=client,
+        )
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+        assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+        assert exc_info.value.status_code == 502
+
+    def test_unknown_extra_fields_fail_loudly(self) -> None:
+        mock_data = {
+            "id": "chatcmpl-123",
+            "unexpected_top_key": "bad",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Valid text",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        transport = httpx.MockTransport(lambda req: _create_mock_response(json_data=mock_data))
         client = httpx.AsyncClient(transport=transport)
         provider = OpenAICompatibleChatProvider(
             base_url="http://localhost:8090",
@@ -565,6 +673,284 @@ class TestOpenAICompatibleErrorMappingAndRetries:
         assert exc_info.value.retryable is True
         assert exc_info.value.details == {"estimated_wait_seconds": 5}
 
+    def test_structured_unauthorized_with_retryable_true_is_never_retried(self) -> None:
+        """Upstream marking unauthorized as retryable must be ignored (local policy wins)."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=401,
+                json_data={
+                    "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid token",
+                        "retryable": True,  # Untrusted hint claiming retryable
+                        "request_id": "req-unauth",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.UNAUTHORIZED
+        assert exc_info.value.retryable is False
+        assert attempts == 1  # Never retried
+
+    def test_structured_bad_request_with_retryable_true_is_never_retried(self) -> None:
+        """Upstream marking bad_request as retryable must be ignored (local policy wins)."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=400,
+                json_data={
+                    "error": {
+                        "code": "bad_request",
+                        "message": "Invalid parameters",
+                        "retryable": True,  # Untrusted hint claiming retryable
+                        "request_id": "req-bad",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.BAD_REQUEST
+        assert exc_info.value.retryable is False
+        assert attempts == 1  # Never retried
+
+    def test_structured_error_code_wins_over_conflicting_http_status_unauthorized(self) -> None:
+        """Structured error code 'unauthorized' wins even if HTTP status is 500."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=500,
+                json_data={
+                    "error": {
+                        "code": "unauthorized",
+                        "message": "Token expired in upstream",
+                        "retryable": True,
+                        "request_id": "req-conf-1",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.UNAUTHORIZED
+        assert exc_info.value.retryable is False
+        assert attempts == 1
+
+    def test_structured_error_code_wins_over_conflicting_http_status_bad_request(self) -> None:
+        """Structured error code 'bad_request' wins even if HTTP status is 500."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=500,
+                json_data={
+                    "error": {
+                        "code": "bad_request",
+                        "message": "Malformed payload in upstream",
+                        "retryable": True,
+                        "request_id": "req-conf-2",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.BAD_REQUEST
+        assert exc_info.value.retryable is False
+        assert attempts == 1
+
+    def test_structured_error_code_wins_over_conflicting_http_status_model_not_loaded(self) -> None:
+        """Structured error code 'model_not_loaded' wins even if HTTP status is 400."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=400,
+                json_data={
+                    "error": {
+                        "code": "model_not_loaded",
+                        "message": "Model booting",
+                        "retryable": True,
+                        "request_id": "req-conf-3",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=2,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.MODEL_NOT_LOADED
+        assert exc_info.value.retryable is True
+        assert attempts == 3
+
+    def test_structured_error_code_wins_over_conflicting_http_status_timeout(self) -> None:
+        """Structured error code 'timeout' wins even if HTTP status is 401."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=401,
+                json_data={
+                    "error": {
+                        "code": "timeout",
+                        "message": "Gateway timeout",
+                        "retryable": True,
+                        "request_id": "req-conf-4",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=2,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.TIMEOUT
+        assert exc_info.value.retryable is True
+        assert attempts == 3
+
+    def test_structured_retryable_false_narrows_retryable_error_code(self) -> None:
+        """Upstream advisory retryable=False narrows local retryable policy to False."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=503,
+                json_data={
+                    "error": {
+                        "code": "model_not_loaded",
+                        "message": "Model permanently failed to load",
+                        "retryable": False,  # Narrowing advisory hint
+                        "request_id": "req-narrow",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.MODEL_NOT_LOADED
+        assert exc_info.value.retryable is False
+        assert attempts == 1  # Narrowed to not retry
+
+    def test_unrecognized_structured_code_falls_back_to_http_status(self) -> None:
+        """Unrecognized error codes fall back to HTTP status mapping."""
+        attempts = 0
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            return _create_mock_response(
+                status_code=401,
+                json_data={
+                    "error": {
+                        "code": "custom_vendor_unknown_error",
+                        "message": "Bad authentication credentials",
+                    }
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        provider = OpenAICompatibleChatProvider(
+            base_url="http://localhost:8090",
+            model="qwen",
+            max_retries=3,
+            retry_backoff_seconds=0.01,
+            http_client=client,
+        )
+
+        with pytest.raises(WorkerError) as exc_info:
+            asyncio.run(provider.complete(_create_sample_request()))
+
+        assert exc_info.value.code == WorkerErrorCode.UNAUTHORIZED
+        assert exc_info.value.retryable is False
+        assert attempts == 1
+
     def test_retry_safety_does_not_mutate_request(self) -> None:
         attempts = 0
         received_payloads: list[dict[str, Any]] = []
@@ -627,6 +1013,66 @@ class TestFakeChatProvider:
         assert result.finish_reason == "stop"
         assert len(fake.calls) == 1
         assert fake.calls[0] == req
+
+    def test_fake_chat_provider_repeatability_text(self) -> None:
+        """Calling fake with the same request multiple times must produce byte-identical output."""
+        fake = FakeChatProvider(model="fake-repeat-model")
+        req = _create_sample_request(
+            messages=[
+                ChatMessage(role="system", content="system prompt"),
+                ChatMessage(role="user", content="What is the legal deadline?"),
+            ]
+        )
+
+        results: list[CompletionResult] = []
+        for _ in range(5):
+            res = asyncio.run(fake.complete(req))
+            results.append(res)
+
+        first_dump = results[0].model_dump_json()
+        first_text = results[0].text
+        for i, res in enumerate(results[1:], start=2):
+            assert res.model_dump_json() == first_dump, f"Call {i} deviated from first dump"
+            assert res.text == first_text, f"Call {i} text deviated from first text"
+            assert res.finish_reason == "stop"
+            assert res.model == "fake-repeat-model"
+            assert res.usage.prompt_tokens == results[0].usage.prompt_tokens
+            assert res.usage.completion_tokens == results[0].usage.completion_tokens
+            assert res.usage.total_tokens == results[0].usage.total_tokens
+        assert len(fake.calls) == 5
+
+    def test_fake_chat_provider_repeatability_json(self) -> None:
+        """Calling fake in JSON mode repeatedly must produce byte-identical output."""
+        fake = FakeChatProvider(model="fake-json-model")
+        req = _create_sample_request(
+            messages=[
+                ChatMessage(role="user", content="Extract metadata as JSON"),
+            ],
+            response_format="json_object",
+        )
+
+        results: list[CompletionResult] = []
+        for _ in range(5):
+            res = asyncio.run(fake.complete(req))
+            results.append(res)
+
+        first_dump = results[0].model_dump_json()
+        first_text = results[0].text
+        parsed_first = json.loads(first_text)
+        assert "answer" in parsed_first
+
+        for i, res in enumerate(results[1:], start=2):
+            assert res.model_dump_json() == first_dump, f"JSON call {i} deviated from first dump"
+            assert res.text == first_text
+            assert json.loads(res.text) == parsed_first
+        assert len(fake.calls) == 5
+
+    def test_fake_chat_provider_invalid_pattern_raises(self) -> None:
+        fake = FakeChatProvider()
+        with pytest.raises(ValueError, match="pattern"):
+            fake.set_canned("", "Empty pattern response")
+        with pytest.raises(ValueError, match="pattern"):
+            fake.set_canned("   ", "Whitespace pattern response")
 
     def test_default_json_response(self) -> None:
         fake = FakeChatProvider()
