@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mamagift_retrieval.chunk import Chunk
 
@@ -26,6 +26,13 @@ class IndexEntry(BaseModel):
     embedding_version: str | None = Field(
         default=None, description="Version string of the embedding model."
     )
+
+    @field_validator("embedding")
+    @classmethod
+    def _validate_embedding(cls, v: list[float] | None) -> list[float] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("embedding cannot be a zero-length list")
+        return v
 
 
 class IndexStats(BaseModel):
