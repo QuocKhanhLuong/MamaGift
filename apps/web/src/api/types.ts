@@ -247,3 +247,35 @@ export interface ApiErrorBody {
   request_id: string;
   details: Record<string, unknown>;
 }
+
+// --- Single-document Q&A ----------------------------------------------------
+
+/** The only response states returned by POST /api/v1/documents/{id}/qa. */
+export type QaStatus = "answered" | "insufficient_evidence" | "ai_worker_unavailable" | "failed";
+
+export interface QaCitation {
+  citation_id: string;
+  document_id: string;
+  page_number: number;
+  block_ids: string[];
+  quote: string | null;
+}
+
+export interface QaRetrievalRef {
+  query_id: string;
+}
+
+export interface QaModelRef {
+  provider: string;
+  model: string;
+  version: string;
+}
+
+/** Application DTO mirrored from docs/08_API_AND_DATA_CONTRACTS.md section 15. */
+export interface QaResponse {
+  answer: string;
+  status: QaStatus;
+  citations: QaCitation[];
+  retrieval: QaRetrievalRef;
+  model: QaModelRef;
+}

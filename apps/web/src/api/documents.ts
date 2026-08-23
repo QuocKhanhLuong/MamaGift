@@ -6,6 +6,7 @@ import type {
   DocumentStatus,
   DocumentStatusResponse,
   FeedbackResponse,
+  QaResponse,
   ReprocessResponse,
   UploadResponse,
 } from "./types";
@@ -104,5 +105,22 @@ export function submitFeedback(
   return apiRequest<FeedbackResponse>(`/api/v1/documents/${documentId}/feedback`, {
     method: "POST",
     body: input,
+  });
+}
+
+export interface QaRequest {
+  question: string;
+}
+
+/** Ask a grounded question about this document only. */
+export function askDocumentQuestion(
+  documentId: string,
+  input: QaRequest,
+  signal?: AbortSignal,
+): Promise<QaResponse> {
+  return apiRequest<QaResponse>(`/api/v1/documents/${documentId}/qa`, {
+    method: "POST",
+    body: input,
+    signal,
   });
 }
