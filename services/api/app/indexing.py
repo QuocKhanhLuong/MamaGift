@@ -30,6 +30,8 @@ from .models import Document, ParseRun
 from .settings import Settings, get_settings
 from .state_machine import DocumentStatus
 
+AUTHORITATIVE_FAMILY_ID = "mamagift"
+
 
 class IndexingError(Exception):
     """Raised when indexing a parse run or document fails."""
@@ -94,6 +96,15 @@ async def index_parse_run(
     """
     if not parse_run.id:
         raise IndexingError("parse_run must have a valid id", code="invalid_parse_run")
+
+    authoritative_parse_run = session.get(ParseRun, parse_run.id)
+    if authoritative_parse_run is None:
+        raise IndexingError(
+            f"parse run {parse_run.id!r} not found in database",
+            code="parse_run_not_found",
+        )
+    parse_run = authoritative_parse_run
+
     if not parse_run.document_id:
         raise IndexingError("parse_run must have a valid document_id", code="invalid_parse_run")
     if parse_run.version is None or parse_run.version < 1:
@@ -113,6 +124,12 @@ async def index_parse_run(
         raise IndexingError(
             f"parse_run document_id {parse_run.document_id!r} "
             f"contradicts document.id {document.id!r}",
+            code="scope_mismatch",
+        )
+
+    if family_id != AUTHORITATIVE_FAMILY_ID:
+        raise IndexingError(
+            f"family_id {family_id!r} is not the authoritative family {AUTHORITATIVE_FAMILY_ID!r}",
             code="scope_mismatch",
         )
 
@@ -162,6 +179,10 @@ async def index_parse_run(
         session, default_embedding_version=provider.embedding_version
     )
 
+    existing_stats = index.stats(effective_scope)
+    if not needs_reindex(existing_stats, provider):
+        return existing_stats
+
     # Transition to INDEXING
     curr_status = DocumentStatus(document.status)
     if curr_status == DocumentStatus.PARSE_FAILED:
@@ -183,18 +204,51 @@ async def index_parse_run(
         set_document_status(document, DocumentStatus.READY_FOR_REVIEW)
         set_document_status(document, DocumentStatus.INDEXING)
         session.commit()
+    else:
+        # Delegate unsupported starts to the existing state machine so no rows can
+        # be written without a legal READY_FOR_REVIEW -> INDEXING transition.
+        set_document_status(document, DocumentStatus.INDEXING)
 
     try:
         # Reconstruct CanonicalDocument and build chunks
-        canonical_dict = dict(parse_run.canonical)
-        canonical_dict["document_id"] = parse_run.document_id
-        if "parser_run" in canonical_dict and isinstance(canonical_dict["parser_run"], dict):
-            parser_run_dict = dict(canonical_dict["parser_run"])
-            parser_run_dict["id"] = parse_run.id
-            canonical_dict["parser_run"] = parser_run_dict
-
-        canonical = CanonicalDocument.model_validate(canonical_dict)
-        chunks: list[Chunk] = build_chunks(canonical, document_version=parse_run.version)
+        canonical = CanonicalDocument.model_validate(parse_run.canonical)
+        if canonical.document_id != parse_run.document_id:
+            raise IndexingError(
+                f"canonical document_id {canonical.document_id!r} != {parse_run.document_id!r}",
+                code="provenance_violation",
+            )
+        expected_parser_run_id = f"prun_{parse_run.parser_name}_{parse_run.configuration_hash}"
+        if canonical.parser_run.id != expected_parser_run_id:
+            raise IndexingError(
+                f"canonical parser_run.id {canonical.parser_run.id!r} "
+                f"!= expected {expected_parser_run_id!r}",
+                code="provenance_violation",
+            )
+        if canonical.parser_run.parser_name != parse_run.parser_name:
+            raise IndexingError(
+                f"canonical parser_name {canonical.parser_run.parser_name!r} "
+                f"!= {parse_run.parser_name!r}",
+                code="provenance_violation",
+            )
+        if canonical.parser_run.parser_version != parse_run.parser_version:
+            raise IndexingError(
+                f"canonical parser_version {canonical.parser_run.parser_version!r} "
+                f"!= {parse_run.parser_version!r}",
+                code="provenance_violation",
+            )
+        if canonical.parser_run.configuration_hash != parse_run.configuration_hash:
+            raise IndexingError(
+                f"canonical configuration_hash {canonical.parser_run.configuration_hash!r} "
+                f"!= {parse_run.configuration_hash!r}",
+                code="provenance_violation",
+            )
+        # The canonical artifact keeps the parser/provider run identity above.  The
+        # derived chunk rows must instead bind to the authoritative database ParseRun
+        # identity for the composite FK, without mutating the stored canonical JSON.
+        chunk_canonical = canonical.model_copy(
+            update={"parser_run": canonical.parser_run.model_copy(update={"id": parse_run.id})}
+        )
+        chunks: list[Chunk] = build_chunks(chunk_canonical, document_version=parse_run.version)
 
         # Enforce full provenance validation on all generated chunks
         for chunk in chunks:
@@ -298,34 +352,21 @@ def index_parse_run_sync(
         loop = None
 
     if loop is not None and loop.is_running():
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                asyncio.run,
-                index_parse_run(
-                    session=session,
-                    parse_run=parse_run,
-                    embedding_provider=embedding_provider,
-                    document_index=document_index,
-                    scope=scope,
-                    family_id=family_id,
-                    settings=settings,
-                ),
-            )
-            return future.result()
-    else:
-        return asyncio.run(
-            index_parse_run(
-                session=session,
-                parse_run=parse_run,
-                embedding_provider=embedding_provider,
-                document_index=document_index,
-                scope=scope,
-                family_id=family_id,
-                settings=settings,
-            )
+        raise RuntimeError(
+            "index_parse_run_sync cannot run inside an active event loop; "
+            "await index_parse_run instead"
         )
+    return asyncio.run(
+        index_parse_run(
+            session=session,
+            parse_run=parse_run,
+            embedding_provider=embedding_provider,
+            document_index=document_index,
+            scope=scope,
+            family_id=family_id,
+            settings=settings,
+        )
+    )
 
 
 async def index_document(

@@ -19,9 +19,11 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db import get_engine
 from app.indexing import (
     IndexingError,
     get_default_embedding_provider,
@@ -31,13 +33,15 @@ from app.indexing import (
     needs_reindex,
 )
 from app.models import Document, DocumentChunk, ParseRun
-from app.settings import Settings
-from app.state_machine import DocumentStatus
+from app.settings import Settings, get_settings
+from app.state_machine import DocumentStatus, IllegalTransitionError
 from app.storage import LocalObjectStorage
 from app.worker import drain, process_next_job
 from mamagift_contracts.embedding import EmbeddingResult
 from mamagift_contracts.errors import WorkerError, WorkerErrorCode
+from mamagift_docpipe import CanonicalDocument
 from mamagift_retrieval.chunk import validate_chunk_tree
+from mamagift_retrieval.chunking import build_chunks
 from mamagift_retrieval.index import IndexStats, SqlDocumentIndex
 from mamagift_retrieval.index.sql_index import _row_to_chunk
 from mamagift_retrieval.providers import FakeEmbeddingProvider
@@ -106,16 +110,35 @@ def test_full_parse_run_to_indexed_chunks_provenance_preserved(
 
     # Query chunk rows from DB
     chunk_rows = list(
-        session.scalars(select(DocumentChunk).where(DocumentChunk.document_id == document_id)).all()
+        session.scalars(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_index)
+        ).all()
     )
     assert len(chunk_rows) == stats.total_chunks
 
+    canonical = CanonicalDocument.model_validate(parse_run.canonical)
+    expected_chunks = build_chunks(
+        canonical.model_copy(
+            update={"parser_run": canonical.parser_run.model_copy(update={"id": parse_run.id})}
+        ),
+        document_version=parse_run.version,
+    )
+    assert len(expected_chunks) == len(chunk_rows)
+
     # Verify provenance on every chunk row
-    for idx, row in enumerate(chunk_rows):
+    for idx, (row, expected) in enumerate(zip(chunk_rows, expected_chunks, strict=True)):
         assert row.document_id == document_id
         assert row.parse_run_id == parse_run.id
         assert row.document_version == parse_run.version
         assert row.chunk_index == idx
+        assert row.id == expected.chunk_id
+        assert row.parent_chunk_id == expected.parent_chunk_id
+        assert row.source_block_ids == expected.source_block_ids
+        assert row.page_numbers == expected.source_page_numbers
+        assert row.section_path == expected.section_path
+        assert row.text == expected.text
         assert row.text
         assert row.token_count > 0
         assert row.embedding is not None
@@ -307,6 +330,32 @@ def test_state_machine_transitions_taken(
     assert doc.status == DocumentStatus.READY.value
 
 
+def test_unsupported_initial_state_is_rejected_without_index_rows(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths: dict[str, Any],
+) -> None:
+    document_id, parse_run = _create_and_parse_document(
+        client, upload, session, storage, settings, fixture_paths["quyet_dinh"].read_bytes()
+    )
+    document = session.get(Document, document_id)
+    assert document is not None
+    document.status = DocumentStatus.UPLOADED.value
+    session.commit()
+
+    with pytest.raises(IllegalTransitionError, match="UPLOADED -> INDEXING"):
+        index_parse_run_sync(session, parse_run, embedding_provider=FakeEmbeddingProvider())
+
+    assert session.get(Document, document_id).status == DocumentStatus.UPLOADED.value
+    assert (
+        session.scalar(select(DocumentChunk.id).where(DocumentChunk.document_id == document_id))
+        is None
+    )
+
+
 # ---------------------------------------------------------------------------
 # 5. Indexing failure leaves document intact, uncorrupted, and recoverable
 # ---------------------------------------------------------------------------
@@ -402,8 +451,15 @@ def test_embedding_version_change_forces_reindex(
 
     assert not needs_reindex(stats_v1, provider_v1)
 
-    # Change to provider v2
-    provider_v2 = FakeEmbeddingProvider(embedding_version="fake-bge-m3-v2")
+    class CountingEmbeddingProvider(FakeEmbeddingProvider):
+        document_calls = 0
+
+        async def embed_documents(self, texts: list[str]) -> EmbeddingResult:
+            self.document_calls += 1
+            return await super().embed_documents(texts)
+
+    # Change to provider v2 through the public runtime indexing pipeline.
+    provider_v2 = CountingEmbeddingProvider(embedding_version="fake-bge-m3-v2")
     assert needs_reindex(stats_v1, provider_v2)
 
     # Search with v2 version filter excludes v1 rows
@@ -417,13 +473,31 @@ def test_embedding_version_change_forces_reindex(
     index_v2 = SqlDocumentIndex(session, embedding_version=provider_v2.embedding_version)
     results = index_v2.search_dense(scope, query_embed.vectors[0], top_k=5)
     assert len(results) == 0  # v1 chunks are excluded
+    provider_v2.document_calls = 0
 
-    # Re-index with provider v2
-    stats_v2 = index_parse_run_sync(
-        session, parse_run, embedding_provider=provider_v2, document_index=index
+    stats_v2 = asyncio.run(
+        index_document(
+            session,
+            document_id,
+            embedding_provider=provider_v2,
+            document_index=index,
+        )
     )
     assert stats_v2.embedding_version == "fake-bge-m3-v2"
     assert not needs_reindex(stats_v2, provider_v2)
+    assert provider_v2.document_calls == 1
+
+    # A second runtime call with the same provider version is a no-op.
+    stats_v2_repeat = asyncio.run(
+        index_document(
+            session,
+            document_id,
+            embedding_provider=provider_v2,
+            document_index=index,
+        )
+    )
+    assert stats_v2_repeat.embedding_version == "fake-bge-m3-v2"
+    assert provider_v2.document_calls == 1
 
     # Search with v2 now succeeds
     results_v2 = index_v2.search_dense(scope, query_embed.vectors[0], top_k=5)
@@ -506,9 +580,25 @@ def test_index_document_by_id(
     )
 
     provider = FakeEmbeddingProvider()
+    index_parse_run_sync(session, parse_run, embedding_provider=provider)
+    reprocess_resp = client.post(f"/api/v1/documents/{document_id}/reprocess")
+    assert reprocess_resp.status_code == 202
+    run_v2 = process_next_job(session, storage, settings, "worker-test", auto_index=False)
+    assert run_v2 is not None
+    assert run_v2.version == 2
+
     stats = asyncio.run(index_document(session, document_id, embedding_provider=provider))
     assert stats.document_id == document_id
-    assert stats.parse_run_id == parse_run.id
+    assert stats.parse_run_id == run_v2.id
+
+    stats_v1 = asyncio.run(
+        index_document(session, document_id, embedding_provider=provider, version=1)
+    )
+    assert stats_v1.parse_run_id == parse_run.id
+    stats_by_id = asyncio.run(
+        index_document(session, document_id, embedding_provider=provider, parse_run_id=parse_run.id)
+    )
+    assert stats_by_id.parse_run_id == parse_run.id
 
 
 def test_index_document_sync_helper(
@@ -525,8 +615,22 @@ def test_index_document_sync_helper(
     )
 
     provider = FakeEmbeddingProvider()
+    index_parse_run_sync(session, parse_run, embedding_provider=provider)
+    reprocess_resp = client.post(f"/api/v1/documents/{document_id}/reprocess")
+    assert reprocess_resp.status_code == 202
+    run_v2 = process_next_job(session, storage, settings, "worker-test", auto_index=False)
+    assert run_v2 is not None
+    assert run_v2.version == 2
+
     stats = index_document_sync(session, document_id, embedding_provider=provider)
     assert stats.document_id == document_id
+    assert stats.parse_run_id == run_v2.id
+    stats_v1 = index_document_sync(session, document_id, embedding_provider=provider, version=1)
+    assert stats_v1.parse_run_id == parse_run.id
+    stats_by_id = index_document_sync(
+        session, document_id, embedding_provider=provider, parse_run_id=parse_run.id
+    )
+    assert stats_by_id.parse_run_id == parse_run.id
 
 
 def test_index_document_not_found_raises(session: Session) -> None:
@@ -540,8 +644,16 @@ def test_index_document_not_found_raises(session: Session) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_guard_parse_run_validation(session: Session) -> None:
-    # 1. missing id
+def test_guard_parse_run_validation(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths: dict[str, Any],
+) -> None:
+    # A detached object is addressed only by its identity; all other fields come
+    # from the authoritative database row.
     invalid_run_1 = ParseRun(
         id="",
         document_id="doc_1",
@@ -551,35 +663,20 @@ def test_guard_parse_run_validation(session: Session) -> None:
     with pytest.raises(IndexingError, match="valid id"):
         index_parse_run_sync(session, invalid_run_1)
 
-    # 2. missing document_id
-    invalid_run_2 = ParseRun(
-        id="prun_1",
-        document_id="",
-        version=1,
-        canonical={"document_id": "doc_1"},
+    document_id, parse_run = _create_and_parse_document(
+        client, upload, session, storage, settings, fixture_paths["quyet_dinh"].read_bytes()
     )
-    with pytest.raises(IndexingError, match="valid document_id"):
-        index_parse_run_sync(session, invalid_run_2)
 
-    # 3. invalid version
-    invalid_run_3 = ParseRun(
-        id="prun_1",
-        document_id="doc_1",
-        version=0,
-        canonical={"document_id": "doc_1"},
-    )
+    parse_run.version = 0
+    session.commit()
     with pytest.raises(IndexingError, match="positive version"):
-        index_parse_run_sync(session, invalid_run_3)
+        index_parse_run_sync(session, ParseRun(id=parse_run.id))
 
-    # 4. missing canonical
-    invalid_run_4 = ParseRun(
-        id="prun_1",
-        document_id="doc_1",
-        version=1,
-        canonical={},
-    )
+    parse_run.version = 1
+    parse_run.canonical = {}
+    session.commit()
     with pytest.raises(IndexingError, match="canonical document"):
-        index_parse_run_sync(session, invalid_run_4)
+        index_parse_run_sync(session, ParseRun(id=parse_run.id))
 
 
 def test_guard_document_not_found(session: Session) -> None:
@@ -589,8 +686,66 @@ def test_guard_document_not_found(session: Session) -> None:
         version=1,
         canonical={"document_id": "doc_nonexistent", "schema_version": "1.0"},
     )
-    with pytest.raises(IndexingError, match="not found in database"):
+    with pytest.raises(IndexingError, match="parse run 'prun_1' not found"):
         index_parse_run_sync(session, run)
+
+
+def test_guard_detached_or_ghost_parse_run_is_rejected(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths: dict[str, Any],
+) -> None:
+    document_id, parse_run = _create_and_parse_document(
+        client, upload, session, storage, settings, fixture_paths["quyet_dinh"].read_bytes()
+    )
+    detached = ParseRun(
+        id="prun_ghost",
+        document_id=document_id,
+        version=parse_run.version,
+        canonical=dict(parse_run.canonical),
+    )
+
+    with pytest.raises(IndexingError, match="parse run 'prun_ghost' not found"):
+        index_parse_run_sync(session, detached, embedding_provider=FakeEmbeddingProvider())
+
+    assert (
+        session.scalar(select(DocumentChunk.id).where(DocumentChunk.document_id == document_id))
+        is None
+    )
+
+
+def test_guard_canonical_identity_is_never_relabelled(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths: dict[str, Any],
+) -> None:
+    document_id, parse_run = _create_and_parse_document(
+        client, upload, session, storage, settings, fixture_paths["quyet_dinh"].read_bytes()
+    )
+    original_canonical = dict(parse_run.canonical)
+
+    mismatched_document = dict(original_canonical)
+    mismatched_document["document_id"] = "doc_foreign"
+    parse_run.canonical = mismatched_document
+    session.commit()
+    with pytest.raises(IndexingError, match="canonical document_id"):
+        index_parse_run_sync(session, parse_run, embedding_provider=FakeEmbeddingProvider())
+
+    parse_run = session.get(ParseRun, parse_run.id)
+    assert parse_run is not None
+    mismatched_parser_run = dict(original_canonical)
+    mismatched_parser_run["parser_run"] = dict(original_canonical["parser_run"])
+    mismatched_parser_run["parser_run"]["id"] = "prun_foreign"
+    parse_run.canonical = mismatched_parser_run
+    session.commit()
+    with pytest.raises(IndexingError, match="canonical parser_run.id"):
+        index_parse_run_sync(session, parse_run, embedding_provider=FakeEmbeddingProvider())
 
 
 def test_guard_scope_mismatch_rejections(
@@ -615,6 +770,14 @@ def test_guard_scope_mismatch_rejections(
     )
     with pytest.raises(IndexingError, match="contradicts expected family_id"):
         index_parse_run_sync(session, parse_run, scope=scope_bad_family)
+
+    with pytest.raises(IndexingError, match="authoritative family"):
+        index_parse_run_sync(
+            session,
+            parse_run,
+            family_id="other_family",
+            embedding_provider=FakeEmbeddingProvider(),
+        )
 
     # Mismatched document_id
     scope_bad_doc = EvidenceScope(
@@ -810,3 +973,56 @@ def test_guard_chunk_provenance_mismatch(
     with patch("app.indexing.build_chunks", bad_ver_chunks):
         with pytest.raises(IndexingError, match="chunk document_version"):
             index_parse_run_sync(session, parse_run)
+
+
+def test_sqlite_foreign_keys_reject_violating_chunk_insert(
+    session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Use the application engine so this proves the production connection listener,
+    # not an unrelated test engine's local configuration.
+    monkeypatch.setenv("DATABASE_URL", settings.database_url)
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    engine = get_engine()
+    if engine.dialect.name != "sqlite":
+        engine.dispose()
+        get_engine.cache_clear()
+        pytest.skip("SQLite-specific foreign key enforcement test")
+
+    try:
+        with Session(engine) as app_session:
+            document = Document(
+                id="doc_fk",
+                filename="fk.pdf",
+                content_type="application/pdf",
+                byte_size=1,
+                checksum_sha256="sha_fk",
+                storage_uri="local://fk",
+            )
+            app_session.add(document)
+            app_session.commit()
+
+            assert app_session.scalar(text("PRAGMA foreign_keys")) == 1
+            app_session.add(
+                DocumentChunk(
+                    id="chunk_fk_ghost",
+                    document_id=document.id,
+                    parse_run_id="prun_ghost",
+                    document_version=1,
+                    chunk_index=0,
+                    section_path=[],
+                    page_numbers=[1],
+                    source_block_ids=["b1"],
+                    text="must be rejected",
+                    token_count=3,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                app_session.commit()
+            app_session.rollback()
+    finally:
+        engine.dispose()
+        get_engine.cache_clear()
+        get_settings.cache_clear()
