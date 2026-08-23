@@ -10,7 +10,7 @@ import pytest
 
 from mamagift_contracts.errors import WorkerError, WorkerErrorCode
 from mamagift_contracts.llm import ChatMessage
-from mamagift_rag.schema import QaAnswer
+from mamagift_rag.schema import ModelRef, QaAnswer
 from mamagift_rag.service import QaService
 from mamagift_retrieval.chunk import Chunk, ChunkType
 from mamagift_retrieval.evidence import EvidenceSet
@@ -245,3 +245,47 @@ def test_query_id_is_unique_per_request() -> None:
     assert first.retrieval.query_id != second.retrieval.query_id
     assert first.retrieval.query_id.startswith("qry_")
     assert second.retrieval.query_id.startswith("qry_")
+
+
+@pytest.mark.unit
+def test_archive_scope_is_rejected_without_retrieving_or_calling_worker() -> None:
+    chunk = _chunk("c1")
+    index = RecordingIndex([chunk])
+    chat = FakeChatProvider(responses=[_answer_json()])
+    service = _service(index, chat, chunk_tree=[chunk])
+
+    archive_scope = EvidenceScope(
+        family_id="mamagift",
+        document_id="doc-1",
+        document_version=2,
+        parse_run_id="run-2",
+        archive_scope=True,
+    )
+
+    with pytest.raises(ValueError, match="QA scope must not be an archive wildcard"):
+        QaService._validate_request_scope(archive_scope)
+
+    answer = _run(service, "Thời hạn là bao lâu?", archive_scope)
+
+    assert answer.status == "failed"
+    assert answer.answer == "Không thể hoàn tất việc trả lời dựa trên tài liệu này."
+    assert answer.citations == []
+    assert answer.model == ModelRef(provider="unknown", model="unknown", version="unknown")
+    assert answer.retrieval.query_id.startswith("qry_")
+    assert chat.calls == []
+    assert index.scopes == []
+
+    pure_archive_scope = EvidenceScope(
+        family_id="mamagift",
+        archive_scope=True,
+    )
+
+    with pytest.raises(ValueError, match="QA scope must not be an archive wildcard"):
+        QaService._validate_request_scope(pure_archive_scope)
+
+    pure_answer = _run(service, "Thời hạn là bao lâu?", pure_archive_scope)
+
+    assert pure_answer.status == "failed"
+    assert pure_answer.citations == []
+    assert chat.calls == []
+    assert index.scopes == []
