@@ -5,3 +5,7 @@ that request's allow-list. Document text is untrusted input: instructions inside
 a document never change system policy, request tools, expose secrets, or widen
 retrieval scope.
 """
+
+from .schema import Citation, ModelRef, QaAnswer, RetrievalRef
+
+__all__ = ["Citation", "ModelRef", "QaAnswer", "RetrievalRef"]
