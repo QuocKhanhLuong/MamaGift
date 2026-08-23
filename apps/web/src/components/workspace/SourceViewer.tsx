@@ -8,11 +8,11 @@ import type { CanonicalBlock, CanonicalPage } from "../../api/types";
 function PreviewImage({
   documentId,
   page,
-  focusedBlock,
+  focusedBlocks,
 }: {
   documentId: string;
   page: CanonicalPage;
-  focusedBlock: CanonicalBlock | undefined;
+  focusedBlocks: CanonicalBlock[];
 }) {
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
 
@@ -34,18 +34,22 @@ function PreviewImage({
         onLoad={() => setImageState("ready")}
         onError={() => setImageState("error")}
       />
-      {focusedBlock?.bbox ? (
-        <span
-          aria-hidden="true"
-          className="absolute rounded-mg-sm border-2 border-mg-accent bg-mg-accent-soft/50"
-          style={{
-            left: `${(focusedBlock.bbox.x0 / page.width) * 100}%`,
-            top: `${(focusedBlock.bbox.y0 / page.height) * 100}%`,
-            width: `${((focusedBlock.bbox.x1 - focusedBlock.bbox.x0) / page.width) * 100}%`,
-            height: `${((focusedBlock.bbox.y1 - focusedBlock.bbox.y0) / page.height) * 100}%`,
-          }}
-        />
-      ) : null}
+      {focusedBlocks.map((block) =>
+        block.bbox ? (
+          <span
+            key={block.id}
+            aria-hidden="true"
+            className="absolute rounded-mg-sm border-2 border-mg-accent bg-mg-accent-soft/50"
+            data-source-block-id={block.id}
+            style={{
+              left: `${(block.bbox.x0 / page.width) * 100}%`,
+              top: `${(block.bbox.y0 / page.height) * 100}%`,
+              width: `${((block.bbox.x1 - block.bbox.x0) / page.width) * 100}%`,
+              height: `${((block.bbox.y1 - block.bbox.y0) / page.height) * 100}%`,
+            }}
+          />
+        ) : null,
+      )}
     </div>
   );
 }
@@ -61,12 +65,15 @@ export function SourceViewer({
   pageCount,
   onPageChange,
   focusedBlockId,
+  focusedBlockIds,
 }: {
   documentId: string;
   page: CanonicalPage | null;
   pageCount: number;
   onPageChange: (page: number) => void;
-  focusedBlockId: string | null;
+  focusedBlockId?: string | null;
+  /** Multiple IDs let one citation highlight every source block on the page. */
+  focusedBlockIds?: readonly string[];
 }) {
   if (!page) {
     return (
@@ -76,9 +83,12 @@ export function SourceViewer({
     );
   }
 
-  const focusedBlock: CanonicalBlock | undefined = focusedBlockId
-    ? page.blocks.find((block) => block.id === focusedBlockId)
-    : undefined;
+  const requestedBlockIds = focusedBlockIds ?? (focusedBlockId ? [focusedBlockId] : []);
+  const focusedBlocks = requestedBlockIds
+    .map((blockId) => page.blocks.find((block) => block.id === blockId))
+    .filter((block): block is CanonicalBlock => block !== undefined);
+  const focusedBlock = focusedBlocks[0];
+  const unresolvedBlockCount = requestedBlockIds.length - focusedBlocks.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -111,13 +121,17 @@ export function SourceViewer({
           key={`${documentId}-${page.page_number}`}
           documentId={documentId}
           page={page}
-          focusedBlock={focusedBlock}
+          focusedBlocks={focusedBlocks}
         />
       </div>
 
-      {focusedBlock ? (
+      {focusedBlock && unresolvedBlockCount === 0 ? (
         <p className="sr-only" role="status">
           Đang xem đoạn nội dung được trích dẫn ở trang {focusedBlock.provenance.page_number}.
+        </p>
+      ) : unresolvedBlockCount > 0 ? (
+        <p className="text-sm text-mg-danger" role="alert">
+          Không thể định vị đầy đủ đoạn được trích dẫn ở trang {page.page_number}.
         </p>
       ) : null}
     </div>
