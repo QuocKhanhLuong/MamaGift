@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import Document, FeedbackEvent, Job, ParseRun
 
@@ -206,3 +206,18 @@ class FeedbackResponse(BaseModel):
             comment=event.comment,
             created_at=event.created_at,
         )
+
+
+class QaRequest(BaseModel):
+    """The single-document Q&A request body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1)
+
+    @field_validator("question")
+    @classmethod
+    def question_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
