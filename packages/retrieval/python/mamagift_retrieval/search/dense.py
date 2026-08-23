@@ -114,7 +114,6 @@ class DenseRetriever:
             scope=scope,
             query_vector=query_vector,
             top_k=top_k,
-            embedding_version=self._embedding_provider.embedding_version,
         )
 
         results: list[ScoredChunk] = []

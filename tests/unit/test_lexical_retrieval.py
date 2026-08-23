@@ -91,14 +91,22 @@ def test_exact_document_number_retrieval() -> None:
         1,
         text="Báo cáo số 15/BC-BGDĐT về tổng kết năm học 2025-2026 của Bộ Giáo dục và Đào tạo.",
     )
+    c_fragment = _make_chunk(
+        "c_fragment",
+        doc_id,
+        run_id,
+        1,
+        text="Công văn có mã 12 KH UBND nhưng không chứa số văn bản đầy đủ.",
+    )
 
-    index = BM25Index([c1, c2, c3, c4], scope=scope)
+    index = BM25Index([c1, c2, c3, c4, c_fragment], scope=scope)
 
     # Query 1: "12/KH-UBND"
     hits_12 = index.search("12/KH-UBND", scope=scope, top_k=5)
     assert len(hits_12) >= 1
     assert hits_12[0].chunk.chunk_id == "c_kh_12"
     assert hits_12[0].rank == 1
+    assert [hit.chunk.chunk_id for hit in hits_12] == ["c_kh_12"]
     assert hits_12[0].retriever == "lexical"
 
     # Query 2: "Số: 45/2026/NĐ-CP"
@@ -370,7 +378,9 @@ def test_scope_and_version_isolation() -> None:
     )
 
     # Combined index with multiple chunks
-    multi_index = BM25Index([c_a1, c_a2, c_b1])
+    multi_index = BM25Index(
+        [c_a1, c_a2, c_b1], scope=EvidenceScope(family_id="fam_01", archive_scope=True)
+    )
 
     # Search scoped to doc_a, run_a1
     hits_a1 = multi_index.search("công nghệ", scope=scope_a_r1, top_k=10)
@@ -392,6 +402,33 @@ def test_scope_and_version_isolation() -> None:
     assert hits_b1[0].chunk.chunk_id == "cb1"
     assert hits_b1[0].chunk.document_id == doc_b
     assert hits_b1[0].chunk.parse_run_id == "run_b1"
+
+    wrong_family = EvidenceScope(
+        family_id="different-family",
+        document_id=doc_a,
+        parse_run_id="run_a1",
+        document_version=1,
+    )
+    assert multi_index.search("công nghệ", scope=wrong_family, top_k=10) == []
+
+
+def test_document_only_scope_is_rejected_before_retrieval() -> None:
+    scope = EvidenceScope(
+        family_id="fam_01",
+        document_id="doc_unpinned",
+        document_version=1,
+        parse_run_id="run_01",
+    )
+    chunk = _make_chunk("c1", "doc_unpinned", "run_01", 1, text="nội dung")
+    index = BM25Index([chunk], scope=scope)
+    unpinned = EvidenceScope(family_id="fam_01", document_id="doc_unpinned")
+
+    with pytest.raises(ValueError, match="scope must specify parse_run_id or document_version"):
+        index.search("nội dung", scope=unpinned, top_k=5)
+
+    retriever = BM25LexicalRetriever.from_chunks([chunk], scope=scope)
+    with pytest.raises(ValueError, match="scope must specify parse_run_id or document_version"):
+        retriever.search("nội dung", scope=unpinned, top_k=5)
 
 
 # ============================================================================
@@ -581,24 +618,15 @@ def test_bm25_lexical_retriever_from_chunks_and_alias() -> None:
     assert hits1[0].chunk.chunk_id == "c1"
     assert hits1[0].retriever == "lexical"
 
-    # Style 2: search(scope, query)
-    hits2 = retriever.search(scope, "hướng dẫn", top_k=5)
-    assert len(hits2) == 1
-    assert hits2[0].chunk.chunk_id == "c1"
-
-    # Style 3: retrieve(query, scope=scope)
-    hits3 = retriever.retrieve("hướng dẫn", scope=scope, top_k=5)
-    assert len(hits3) == 1
-    assert hits3[0].chunk.chunk_id == "c1"
-
 
 class FakeDocumentIndex:
     """Fake DocumentIndex to test pass-through behavior."""
 
-    def __init__(self) -> None:
+    def __init__(self, returned_document_version: int | None = None) -> None:
         self.last_scope: EvidenceScope | None = None
         self.last_query: str | None = None
         self.last_top_k: int | None = None
+        self.returned_document_version = returned_document_version
 
     def replace(self, scope: EvidenceScope, entries: list[IndexEntry]) -> IndexStats:
         return IndexStats(
@@ -618,7 +646,7 @@ class FakeDocumentIndex:
             "c_passthrough",
             scope.document_id or "",
             scope.parse_run_id or "",
-            1,
+            self.returned_document_version or scope.document_version or 1,
             text="Pass-through text",
         )
         return [ScoredChunk(chunk=c, score=0.95, rank=1, retriever="lexical")]
@@ -649,6 +677,20 @@ def test_document_index_scope_passthrough() -> None:
     assert results[0].rank == 1
     assert results[0].score == 0.95
     assert results[0].retriever == "lexical"
+    assert results[0].chunk.document_id == scope.document_id
+    assert results[0].chunk.document_version == scope.document_version
+    assert results[0].chunk.parse_run_id == scope.parse_run_id
+
+
+def test_document_index_rejects_returned_provenance_mismatch() -> None:
+    fake_index = FakeDocumentIndex(returned_document_version=2)
+    retriever = BM25LexicalRetriever(fake_index)
+    scope = EvidenceScope(
+        family_id="fam_01", document_id="doc_pass", parse_run_id="run_pass", document_version=3
+    )
+
+    with pytest.raises(ValueError, match="violates requested EvidenceScope"):
+        retriever.search("nhiệm vụ", scope=scope, top_k=7)
 
 
 # ============================================================================
@@ -674,6 +716,10 @@ def test_vi_tokenization_details() -> None:
     # Document numbers
     tokens_doc = tokenize_vi("Công văn số 123/QĐ-UBND/2026 ngày ban hành")
     assert "123/qđ-ubnd/2026" in tokens_doc
+    assert "123" not in tokens_doc
+    assert "qđ" not in tokens_doc
+    assert "ubnd" not in tokens_doc
+    assert "2026" not in tokens_doc
 
     # Legal markers
     tokens_legal = tokenize_vi("Điều 12a và Khoản 3 Điểm b Chương IV Mục 2 Phụ lục II")
