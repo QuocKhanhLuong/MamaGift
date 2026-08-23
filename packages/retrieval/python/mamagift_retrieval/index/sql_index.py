@@ -7,7 +7,18 @@ import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import CursorResult, Engine, delete, select
+from sqlalchemy import (
+    Column,
+    CursorResult,
+    Engine,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    delete,
+    func,
+    select,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import DocumentChunk
@@ -17,6 +28,29 @@ from mamagift_retrieval.scope import EvidenceScope, scope_matches
 from .entries import IndexEntry, IndexStats, ScoredChunk
 
 _TOKEN_RE = re.compile(r"[^\W\d_]+|\d+", re.UNICODE)
+
+_scope_metadata = MetaData()
+_document_scopes_table = Table(
+    "document_index_scopes",
+    _scope_metadata,
+    Column("document_id", String(64), primary_key=True),
+    Column("parse_run_id", String(64), primary_key=True),
+    Column("document_version", Integer, nullable=False),
+    Column("family_id", String(128), nullable=False),
+)
+
+
+def _ensure_scope_table(session: Session) -> None:
+    bind = session.get_bind()
+    _scope_metadata.create_all(bind, checkfirst=True)
+
+
+def _get_family_map(session: Session, document_id: str) -> dict[str, str]:
+    _ensure_scope_table(session)
+    stmt = select(_document_scopes_table.c.parse_run_id, _document_scopes_table.c.family_id).where(
+        _document_scopes_table.c.document_id == document_id,
+    )
+    return dict(session.execute(stmt).all())  # type: ignore[arg-type]
 
 
 def _tokenize(text: str) -> set[str]:
@@ -46,9 +80,11 @@ def _infer_chunk_type(chunk_id_str: str, section_path: list[str]) -> ChunkType:
 
 
 def _row_to_chunk(row: DocumentChunk) -> Chunk:
+    if not row.page_numbers or not row.source_block_ids:
+        raise ValueError(f"stored chunk {row.id!r} has missing or empty source provenance")
     section_path = list(row.section_path) if row.section_path else []
-    page_numbers = list(row.page_numbers) if row.page_numbers else [1]
-    source_block_ids = list(row.source_block_ids) if row.source_block_ids else [row.id]
+    page_numbers = list(row.page_numbers)
+    source_block_ids = list(row.source_block_ids)
     chunk_type = _infer_chunk_type(row.id, section_path)
     return Chunk(
         chunk_id=row.id,
@@ -93,10 +129,11 @@ class SqlDocumentIndex:
         self,
         session_or_factory: sessionmaker[Session] | Session | Engine | Callable[[], Session],
         *,
+        embedding_version: str | None = None,
         default_embedding_version: str | None = None,
     ) -> None:
         self._session_or_factory = session_or_factory
-        self._default_embedding_version = default_embedding_version
+        self._embedding_version = embedding_version or default_embedding_version
 
     @contextmanager
     def _get_session(self) -> Iterator[Session]:
@@ -117,14 +154,20 @@ class SqlDocumentIndex:
             )
 
     def replace(self, scope: EvidenceScope, entries: list[IndexEntry]) -> IndexStats:
+        if not scope.family_id:
+            raise ValueError("scope must specify family_id")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
+        if scope.document_version is None:
+            raise ValueError("scope must specify document_version")
         if not scope.parse_run_id:
             raise ValueError("scope must specify parse_run_id")
 
         if entries:
             validate_chunk_tree([e.chunk for e in entries])
             seen_indices: set[int] = set()
+            emb_versions: set[str] = set()
+            emb_models: set[str] = set()
             for entry in entries:
                 if entry.chunk.document_id != scope.document_id:
                     raise ValueError(
@@ -136,14 +179,14 @@ class SqlDocumentIndex:
                         f"entry chunk parse_run_id {entry.chunk.parse_run_id!r} "
                         f"contradicts scope parse_run_id {scope.parse_run_id!r}"
                     )
-                if (
-                    scope.document_version is not None
-                    and entry.chunk.document_version is not None
-                    and entry.chunk.document_version != scope.document_version
-                ):
+                if entry.chunk.document_version != scope.document_version:
                     raise ValueError(
                         f"entry chunk document_version {entry.chunk.document_version!r} "
                         f"contradicts scope document_version {scope.document_version!r}"
+                    )
+                if not entry.chunk.source_page_numbers or not entry.chunk.source_block_ids:
+                    raise ValueError(
+                        f"entry chunk {entry.chunk.chunk_id!r} missing source provenance"
                     )
                 candidate_scope = EvidenceScope(
                     family_id=scope.family_id,
@@ -162,21 +205,49 @@ class SqlDocumentIndex:
                     raise ValueError(f"duplicate chunk_index {entry.chunk_index}")
                 seen_indices.add(entry.chunk_index)
 
+                if entry.embedding is not None:
+                    if len(entry.embedding) == 0:
+                        raise ValueError(
+                            f"entry chunk {entry.chunk.chunk_id!r} has zero-length embedding"
+                        )
+                    if entry.embedding_version:
+                        emb_versions.add(entry.embedding_version)
+                    if entry.embedding_model:
+                        emb_models.add(entry.embedding_model)
+
+            if len(emb_versions) > 1:
+                raise ValueError(
+                    f"entries contain mixed embedding_versions: {sorted(emb_versions)}"
+                )
+            if len(emb_models) > 1:
+                raise ValueError(f"entries contain mixed embedding_models: {sorted(emb_models)}")
+
         with self._get_session() as session:
+            _ensure_scope_table(session)
             trans_cm = session.begin_nested() if session.in_transaction() else session.begin()
             with trans_cm:
                 del_stmt = delete(DocumentChunk).where(
                     DocumentChunk.document_id == scope.document_id,
                     DocumentChunk.parse_run_id == scope.parse_run_id,
+                    DocumentChunk.document_version == scope.document_version,
                 )
                 session.execute(del_stmt)
 
+                del_scope = delete(_document_scopes_table).where(
+                    _document_scopes_table.c.document_id == scope.document_id,
+                    _document_scopes_table.c.parse_run_id == scope.parse_run_id,
+                )
+                session.execute(del_scope)
+
+                ins_scope = _document_scopes_table.insert().values(
+                    document_id=scope.document_id,
+                    parse_run_id=scope.parse_run_id,
+                    document_version=scope.document_version,
+                    family_id=scope.family_id,
+                )
+                session.execute(ins_scope)
+
                 for entry in entries:
-                    doc_version = (
-                        entry.chunk.document_version
-                        if entry.chunk.document_version is not None
-                        else (scope.document_version if scope.document_version is not None else 1)
-                    )
                     tok_count = (
                         entry.token_count
                         if entry.token_count > 0
@@ -186,7 +257,7 @@ class SqlDocumentIndex:
                         id=entry.chunk.chunk_id,
                         document_id=entry.chunk.document_id,
                         parse_run_id=entry.chunk.parse_run_id,
-                        document_version=doc_version,
+                        document_version=entry.chunk.document_version,
                         chunk_index=entry.chunk_index,
                         parent_chunk_id=entry.chunk.parent_chunk_id,
                         section_path=entry.chunk.section_path,
@@ -209,14 +280,11 @@ class SqlDocumentIndex:
         embedding_version = next(
             (e.embedding_version for e in entries if e.embedding_version is not None), None
         )
-        reported_version = scope.document_version or (
-            entries[0].chunk.document_version if entries else None
-        )
 
         return IndexStats(
             document_id=scope.document_id,
             parse_run_id=scope.parse_run_id,
-            document_version=reported_version,
+            document_version=scope.document_version,
             total_chunks=total_chunks,
             embedded_chunks=embedded_chunks,
             embedding_model=embedding_model,
@@ -228,18 +296,28 @@ class SqlDocumentIndex:
         scope: EvidenceScope,
         query_vector: list[float],
         top_k: int,
-        embedding_version: str | None = None,
     ) -> list[ScoredChunk]:
+        """Perform exact brute-force cosine similarity search over scoped chunks.
+
+        Rows with missing or stale embedding_version are excluded.
+        Candidates are sorted in descending order of score, with chunk_id ascending as a
+        stable tie-break for equal scores: `(-score, chunk.chunk_id)`.
+        """
         if top_k <= 0:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
         if not query_vector:
             raise ValueError("query_vector cannot be empty")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-
-        target_embedding_version = embedding_version or self._default_embedding_version
+        if not scope.family_id:
+            raise ValueError("scope must specify family_id")
+        if scope.document_version is None and scope.parse_run_id is None:
+            raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
+            _ensure_scope_table(session)
+            family_map = _get_family_map(session, scope.document_id)
+
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -247,10 +325,20 @@ class SqlDocumentIndex:
                 stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
             rows = list(session.scalars(stmt).all())
 
+            family_rows = [r for r in rows if family_map.get(r.parse_run_id) == scope.family_id]
+
+            target_embedding_version = self._embedding_version
+            if target_embedding_version is None:
+                for r in family_rows:
+                    if r.embedding is not None and r.embedding_version is not None:
+                        target_embedding_version = r.embedding_version
+                        break
+
             candidates: list[tuple[float, Chunk]] = []
-            for row in rows:
+            for row in family_rows:
+                row_family = family_map.get(row.parse_run_id)
                 row_scope = EvidenceScope(
-                    family_id=scope.family_id,
+                    family_id=row_family or "",
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,
@@ -271,6 +359,7 @@ class SqlDocumentIndex:
                 chunk = _row_to_chunk(row)
                 candidates.append((sim, chunk))
 
+        # Stable tie-break: descending score, then ascending chunk_id
         candidates.sort(key=lambda item: (-item[0], item[1].chunk_id))
         top_results = candidates[:top_k]
 
@@ -290,16 +379,30 @@ class SqlDocumentIndex:
         query: str,
         top_k: int,
     ) -> list[ScoredChunk]:
+        """Perform lexical term-overlap search over chunks in the scoped document version.
+
+        Candidates are sorted in descending order of score, with chunk_id ascending as a
+        stable tie-break for equal scores: `(-score, chunk.chunk_id)`.
+        """
         if top_k <= 0:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
+        if not scope.family_id:
+            raise ValueError("scope must specify family_id")
+        if scope.document_version is None and scope.parse_run_id is None:
+            raise ValueError("scope must specify parse_run_id or document_version")
 
+        if query is None:
+            return []
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
 
         with self._get_session() as session:
+            _ensure_scope_table(session)
+            family_map = _get_family_map(session, scope.document_id)
+
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -309,8 +412,11 @@ class SqlDocumentIndex:
 
             candidates: list[tuple[float, Chunk]] = []
             for row in rows:
+                row_family = family_map.get(row.parse_run_id)
+                if row_family is None or row_family != scope.family_id:
+                    continue
                 row_scope = EvidenceScope(
-                    family_id=scope.family_id,
+                    family_id=row_family,
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,
@@ -329,6 +435,7 @@ class SqlDocumentIndex:
                 chunk = _row_to_chunk(row)
                 candidates.append((score, chunk))
 
+        # Stable tie-break: descending score, then ascending chunk_id
         candidates.sort(key=lambda item: (-item[0], item[1].chunk_id))
         top_results = candidates[:top_k]
 
@@ -343,27 +450,68 @@ class SqlDocumentIndex:
         ]
 
     def drop(self, scope: EvidenceScope) -> int:
+        """Delete all chunks for the scoped document version / parse run.
+
+        Returns the number of deleted rows.
+        """
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
+        if not scope.family_id:
+            raise ValueError("scope must specify family_id")
+        if scope.document_version is None and scope.parse_run_id is None:
+            raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
+            _ensure_scope_table(session)
+            family_map = _get_family_map(session, scope.document_id)
+
+            matching_runs = [
+                run_id
+                for run_id, fam_id in family_map.items()
+                if fam_id == scope.family_id
+                and (scope.parse_run_id is None or run_id == scope.parse_run_id)
+            ]
+            if not matching_runs:
+                return 0
+
             trans_cm = session.begin_nested() if session.in_transaction() else session.begin()
             with trans_cm:
-                stmt = delete(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
-                if scope.parse_run_id is not None:
-                    stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
+                stmt = delete(DocumentChunk).where(
+                    DocumentChunk.document_id == scope.document_id,
+                    DocumentChunk.parse_run_id.in_(matching_runs),
+                )
                 if scope.document_version is not None:
                     stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
                 result = session.execute(stmt)
-                if isinstance(result, CursorResult):
-                    return int(result.rowcount)
-                return 0
+                deleted_count = int(result.rowcount) if isinstance(result, CursorResult) else 0
+
+                for run_id in matching_runs:
+                    remaining = session.scalar(
+                        select(func.count(DocumentChunk.id)).where(
+                            DocumentChunk.document_id == scope.document_id,
+                            DocumentChunk.parse_run_id == run_id,
+                        )
+                    )
+                    if remaining == 0:
+                        del_scope = delete(_document_scopes_table).where(
+                            _document_scopes_table.c.document_id == scope.document_id,
+                            _document_scopes_table.c.parse_run_id == run_id,
+                        )
+                        session.execute(del_scope)
+
+                return deleted_count
 
     def stats(self, scope: EvidenceScope) -> IndexStats:
+        """Return indexing statistics for the scoped document version / parse run."""
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
+        if not scope.family_id:
+            raise ValueError("scope must specify family_id")
+        if scope.document_version is None and scope.parse_run_id is None:
+            raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
+            _ensure_scope_table(session)
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -371,10 +519,14 @@ class SqlDocumentIndex:
                 stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
             rows = list(session.scalars(stmt).all())
 
+            family_map = _get_family_map(session, scope.document_id)
             matching_rows: list[DocumentChunk] = []
             for row in rows:
+                row_family = family_map.get(row.parse_run_id)
+                if row_family is None or row_family != scope.family_id:
+                    continue
                 row_scope = EvidenceScope(
-                    family_id=scope.family_id,
+                    family_id=row_family,
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,
@@ -393,12 +545,8 @@ class SqlDocumentIndex:
                 (r.embedding_version for r in matching_rows if r.embedding_version is not None),
                 None,
             )
-            doc_version = scope.document_version or (
-                matching_rows[0].document_version if matching_rows else None
-            )
-            parse_run_id = scope.parse_run_id or (
-                matching_rows[0].parse_run_id if matching_rows else ""
-            )
+            doc_version = scope.document_version
+            parse_run_id = scope.parse_run_id or ""
 
             return IndexStats(
                 document_id=scope.document_id,

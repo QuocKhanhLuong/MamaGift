@@ -30,7 +30,6 @@ class DocumentIndex(Protocol):
         scope: EvidenceScope,
         query_vector: list[float],
         top_k: int,
-        embedding_version: str | None = None,
     ) -> list[ScoredChunk]:
         """Perform exact brute-force cosine similarity search over scoped chunks.
 
