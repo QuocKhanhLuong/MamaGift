@@ -1,23 +1,15 @@
-"""Search types for Phase 4 retrieval."""
+"""Ranking contract re-exports for the search package.
+
+`ScoredChunk` is frozen in the Phase 4 plan section 3.3 and has exactly ONE
+definition, in `mamagift_retrieval.index.entries`. Tasks C1 and C2 each declared
+a local copy on their own branches; two structurally identical Pydantic models
+are still different runtime types, so isinstance checks and `extra="forbid"`
+validation would disagree across the fusion boundary. This module re-exports the
+single definition so both retrievers and Task C3's fusion share one type.
+"""
 
 from __future__ import annotations
 
-from typing import Literal
+from mamagift_retrieval.index.entries import ScoredChunk
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from mamagift_retrieval.chunk import Chunk
-
-
-class ScoredChunk(BaseModel):
-    """A retrieved chunk paired with its score, 1-based rank, and retriever origin.
-
-    Contract frozen in Phase 4 Plan §3.3.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    chunk: Chunk
-    score: float
-    rank: int = Field(ge=1, description="1-based rank within retriever results.")
-    retriever: Literal["lexical", "dense", "fused", "reranked"]
+__all__ = ["ScoredChunk"]

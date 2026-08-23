@@ -1,7 +1,8 @@
-"""Search package for Phase 4 single-document RAG."""
+"""Search and retrieval over a single indexed document version (Phase 4)."""
 
 from __future__ import annotations
 
+from .dense import DenseRetriever, EmbeddingVersionMismatchError
 from .lexical import (
     DEFAULT_BM25_B,
     DEFAULT_BM25_K1,
@@ -19,6 +20,8 @@ __all__ = [
     "BM25Params",
     "DEFAULT_BM25_B",
     "DEFAULT_BM25_K1",
+    "DenseRetriever",
+    "EmbeddingVersionMismatchError",
     "LexicalRetriever",
     "ScoredChunk",
     "normalize_vi_text",
