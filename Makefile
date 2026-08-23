@@ -16,7 +16,8 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 	compose-config docs-check repository-hygiene secret-scan check dev \
 	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
 	ingestion-integration admin-parser-golden-tests db-migration-test worker serve-api \
-	web-component-tests web-e2e-smoke feedback-tests retrieval-eval-tests
+	web-component-tests web-e2e-smoke feedback-tests retrieval-eval-tests \
+	ai-worker-contract rag-unit-tests
 
 setup:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --locked
@@ -96,6 +97,17 @@ retrieval-eval-tests:
 		tests/unit/test_document_type_slices.py tests/unit/test_eval_metrics.py \
 		tests/golden/test_plan_chunking_golden.py -q
 
+# Phase 4 AI-worker contract gate. CI never needs the home machine or a real model.
+ai-worker-contract:
+	$(UV_RUN) pytest services/ai-worker/tests tests/unit/test_chat_provider.py \
+		tests/unit/test_embedding_provider.py -q
+
+# Phase 4 grounded-RAG unit gate: providers, index, retrieval and indexing pipeline.
+# Deterministic fakes only -- no model, GPU, network or private data.
+rag-unit-tests:
+	$(UV_RUN) pytest tests/unit/test_document_index.py tests/unit/test_lexical_retrieval.py \
+		tests/unit/test_dense_retrieval.py services/api/tests/test_indexing_pipeline.py -q
+
 
 # Drain the parse queue once against the configured database and storage.
 worker:
@@ -126,6 +138,7 @@ secret-scan:
 check: docs-check repository-hygiene secret-scan backend-format-check backend-lint backend-typecheck backend-test \
 	parser-contract-tests parser-benchmark-smoke \
 	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests retrieval-eval-tests \
+	ai-worker-contract rag-unit-tests \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config \
 	web-e2e-smoke
 

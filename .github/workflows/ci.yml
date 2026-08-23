@@ -305,6 +305,75 @@ jobs:
       - name: Correction feedback tests
         run: uv run pytest services/api/tests/test_feedback_api.py -q
 
+  retrieval-eval-tests:
+    name: retrieval-eval-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Phase 3.5 foundation: scope, chunk contract, chunkers, lexical seam, budget, eval schemas.
+      - name: retrieval-eval-tests
+        run: make retrieval-eval-tests
+
+  ai-worker-contract:
+    name: ai-worker-contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Phase 4 worker contract: health, auth, timeout, and the provider adapters. Deterministic fakes only.
+      - name: ai-worker-contract
+        run: make ai-worker-contract
+
+  rag-unit-tests:
+    name: rag-unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Phase 4 grounded RAG: index isolation, lexical/dense retrieval, indexing pipeline. No model, GPU or network.
+      - name: rag-unit-tests
+        run: make rag-unit-tests
+
   web-e2e-smoke:
     name: web-e2e-smoke
     runs-on: ubuntu-latest
