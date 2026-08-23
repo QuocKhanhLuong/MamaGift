@@ -23,6 +23,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db import get_engine
 from app.indexing import (
     IndexingError,
     get_default_embedding_provider,
@@ -32,7 +33,7 @@ from app.indexing import (
     needs_reindex,
 )
 from app.models import Document, DocumentChunk, ParseRun
-from app.settings import Settings
+from app.settings import Settings, get_settings
 from app.state_machine import DocumentStatus, IllegalTransitionError
 from app.storage import LocalObjectStorage
 from app.worker import drain, process_next_job
@@ -977,36 +978,54 @@ def test_guard_chunk_provenance_mismatch(
             index_parse_run_sync(session, parse_run)
 
 
-def test_sqlite_foreign_keys_reject_violating_chunk_insert(session: Session) -> None:
-    if session.get_bind().dialect.name != "sqlite":
+def test_sqlite_foreign_keys_reject_violating_chunk_insert(
+    session: Session,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Use the application engine so this proves the production connection listener,
+    # not an unrelated test engine's local configuration.
+    monkeypatch.setenv("DATABASE_URL", settings.database_url)
+    get_settings.cache_clear()
+    get_engine.cache_clear()
+    engine = get_engine()
+    if engine.dialect.name != "sqlite":
+        engine.dispose()
+        get_engine.cache_clear()
         pytest.skip("SQLite-specific foreign key enforcement test")
 
-    document = Document(
-        id="doc_fk",
-        filename="fk.pdf",
-        content_type="application/pdf",
-        byte_size=1,
-        checksum_sha256="sha_fk",
-        storage_uri="local://fk",
-    )
-    session.add(document)
-    session.commit()
+    try:
+        with Session(engine) as app_session:
+            document = Document(
+                id="doc_fk",
+                filename="fk.pdf",
+                content_type="application/pdf",
+                byte_size=1,
+                checksum_sha256="sha_fk",
+                storage_uri="local://fk",
+            )
+            app_session.add(document)
+            app_session.commit()
 
-    assert session.scalar(text("PRAGMA foreign_keys")) == 1
-    session.add(
-        DocumentChunk(
-            id="chunk_fk_ghost",
-            document_id=document.id,
-            parse_run_id="prun_ghost",
-            document_version=1,
-            chunk_index=0,
-            section_path=[],
-            page_numbers=[1],
-            source_block_ids=["b1"],
-            text="must be rejected",
-            token_count=3,
-        )
-    )
-    with pytest.raises(IntegrityError):
-        session.commit()
-    session.rollback()
+            assert app_session.scalar(text("PRAGMA foreign_keys")) == 1
+            app_session.add(
+                DocumentChunk(
+                    id="chunk_fk_ghost",
+                    document_id=document.id,
+                    parse_run_id="prun_ghost",
+                    document_version=1,
+                    chunk_index=0,
+                    section_path=[],
+                    page_numbers=[1],
+                    source_block_ids=["b1"],
+                    text="must be rejected",
+                    token_count=3,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                app_session.commit()
+            app_session.rollback()
+    finally:
+        engine.dispose()
+        get_engine.cache_clear()
+        get_settings.cache_clear()

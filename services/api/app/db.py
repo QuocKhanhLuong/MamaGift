@@ -16,7 +16,6 @@ class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
 
 
-@event.listens_for(Engine, "connect")
 def _enable_sqlite_foreign_keys(
     dbapi_connection: object,
     _connection_record: object,
@@ -37,7 +36,10 @@ def get_engine() -> Engine:
     connect_args: dict[str, object] = {}
     if settings.database_url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
-    return create_engine(settings.database_url, future=True, connect_args=connect_args)
+    engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
+    if engine.dialect.name == "sqlite":
+        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+    return engine
 
 
 @lru_cache(maxsize=1)
