@@ -17,7 +17,7 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
 	ingestion-integration admin-parser-golden-tests db-migration-test worker serve-api \
 	web-component-tests web-e2e-smoke feedback-tests retrieval-eval-tests \
-	ai-worker-contract rag-unit-tests
+	ai-worker-contract rag-unit-tests rag-eval-mini
 
 setup:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --locked
@@ -108,6 +108,13 @@ rag-unit-tests:
 	$(UV_RUN) pytest tests/unit/test_document_index.py tests/unit/test_lexical_retrieval.py \
 		tests/unit/test_dense_retrieval.py services/api/tests/test_indexing_pipeline.py -q
 
+# Phase 4 deterministic mini evaluation: retrieval harness, MamaGift answer-quality
+# metrics, failure analysis, and the RAGAS adapter's unavailable path. No real model,
+# no API key, no network -- RAGAS degrades to a typed UNAVAILABLE result.
+rag-eval-mini:
+	$(UV_RUN) pytest tests/unit/test_retrieval_harness.py tests/unit/test_qa_metrics.py \
+		tests/unit/test_failure_analysis.py tests/unit/test_ragas_adapter.py -q
+
 
 # Drain the parse queue once against the configured database and storage.
 worker:
@@ -138,7 +145,7 @@ secret-scan:
 check: docs-check repository-hygiene secret-scan backend-format-check backend-lint backend-typecheck backend-test \
 	parser-contract-tests parser-benchmark-smoke \
 	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests retrieval-eval-tests \
-	ai-worker-contract rag-unit-tests \
+	ai-worker-contract rag-unit-tests rag-eval-mini \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config \
 	web-e2e-smoke
 

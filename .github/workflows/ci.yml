@@ -374,6 +374,30 @@ jobs:
       - name: rag-unit-tests
         run: make rag-unit-tests
 
+  rag-eval-mini:
+    name: rag-eval-mini
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # Deterministic mini evaluation. RAGAS degrades to a typed UNAVAILABLE result,
+      # so this job never needs an API key, a model, or the network.
+      - name: rag-eval-mini
+        run: make rag-eval-mini
+
   web-e2e-smoke:
     name: web-e2e-smoke
     runs-on: ubuntu-latest
