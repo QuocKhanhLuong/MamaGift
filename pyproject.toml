@@ -37,6 +37,7 @@ pythonpath = [
     "packages/docpipe/python",
     "packages/retrieval/python",
     "packages/eval/python",
+    "packages/rag/python",
     "tests",
 ]
 addopts = "-ra --strict-markers"
@@ -60,6 +61,7 @@ src = [
     "packages/docpipe/python",
     "packages/retrieval/python",
     "packages/eval/python",
+    "packages/rag/python",
     "tools",
     "tests",
 ]
@@ -80,10 +82,11 @@ files = [
     "packages/docpipe/python/mamagift_docpipe",
     "packages/retrieval/python/mamagift_retrieval",
     "packages/eval/python/mamagift_eval",
+    "packages/rag/python/mamagift_rag",
     "tools/ci/check_docs.py",
     "tools/parser_bench",
 ]
-mypy_path = "services/api:services/ai-worker:packages/contracts/python:packages/docpipe/python:packages/retrieval/python:packages/eval/python:."
+mypy_path = "services/api:services/ai-worker:packages/contracts/python:packages/docpipe/python:packages/retrieval/python:packages/eval/python:packages/rag/python:."
 check_untyped_defs = true
 disallow_any_generics = true
 disallow_untyped_defs = true

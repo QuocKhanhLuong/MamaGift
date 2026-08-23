@@ -1,7 +1,7 @@
 UV ?= uv
 UV_CACHE_DIR ?= $(CURDIR)/.uv-cache
 # The shared packages are path-based, not installed, so tooling needs them on the path.
-PYTHONPATH_PARTS = packages/contracts/python:packages/docpipe/python:packages/retrieval/python:packages/eval/python
+PYTHONPATH_PARTS = packages/contracts/python:packages/docpipe/python:packages/retrieval/python:packages/eval/python:packages/rag/python
 UV_RUN = UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run
 BENCH_RUN = PYTHONPATH=$(PYTHONPATH_PARTS) $(UV_RUN)
 # `app.*` lives under services/api and is not an installed package.
