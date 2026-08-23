@@ -7,10 +7,10 @@ import json
 from collections.abc import Sequence
 
 import pytest
-from mamagift_rag.schema import QaAnswer
 
 from mamagift_contracts.errors import WorkerError, WorkerErrorCode
 from mamagift_contracts.llm import ChatMessage
+from mamagift_rag.schema import QaAnswer
 from mamagift_rag.service import QaService
 from mamagift_retrieval.chunk import Chunk, ChunkType
 from mamagift_retrieval.evidence import EvidenceSet
