@@ -21,6 +21,16 @@ from .qa_metrics import (
     responsible_party_correctness,
     task_action_completeness,
 )
+from .ragas_adapter import (
+    RAGAS_METRICS,
+    RagasAdapter,
+    RagasAvailableResult,
+    RagasBackend,
+    RagasEvaluationResult,
+    RagasMetricName,
+    RagasMetricResult,
+    RagasUnavailableResult,
+)
 from .retrieval_harness import (
     RetrievalAggregateMetrics,
     RetrievalCaseResult,
@@ -62,4 +72,12 @@ __all__ = [
     "deadline_correctness",
     "responsible_party_correctness",
     "task_action_completeness",
+    "RAGAS_METRICS",
+    "RagasAdapter",
+    "RagasAvailableResult",
+    "RagasBackend",
+    "RagasEvaluationResult",
+    "RagasMetricName",
+    "RagasMetricResult",
+    "RagasUnavailableResult",
 ]
