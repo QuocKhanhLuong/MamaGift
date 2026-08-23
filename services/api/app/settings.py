@@ -26,6 +26,21 @@ class Settings(BaseSettings):
     job_retry_backoff_seconds: int = 30
     page_preview_dpi: int = 110
 
+    # Phase 4 LLM and embedding settings
+    llm_base_url: str = "http://localhost:8090/v1"
+    llm_api_key: str = "local-fake-worker-token"
+    llm_model: str = "qwen2.5-7b-instruct"
+    llm_timeout_seconds: float = 30.0
+    llm_max_retries: int = 3
+    llm_retry_backoff_seconds: float = 0.5
+
+    embedding_base_url: str = "http://localhost:8090/v1"
+    embedding_api_key: str = "local-fake-worker-token"
+    embedding_model: str = "bge-m3"
+    embedding_timeout_seconds: float = 30.0
+
+    reranker_model: str = "bge-reranker-v2-m3"
+
     model_config = SettingsConfigDict(
         env_file=(".env",),
         env_file_encoding="utf-8",
