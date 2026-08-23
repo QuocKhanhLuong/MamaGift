@@ -6,6 +6,17 @@ a document never change system policy, request tools, expose secrets, or widen
 retrieval scope.
 """
 
+from .prompt import build_grounded_prompt
 from .schema import Citation, ModelRef, QaAnswer, RetrievalRef
+from .service import QaService
+from .validation import parse_and_validate_answer
 
-__all__ = ["Citation", "ModelRef", "QaAnswer", "RetrievalRef"]
+__all__ = [
+    "Citation",
+    "ModelRef",
+    "QaAnswer",
+    "QaService",
+    "RetrievalRef",
+    "build_grounded_prompt",
+    "parse_and_validate_answer",
+]
