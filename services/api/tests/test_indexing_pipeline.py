@@ -598,9 +598,9 @@ def test_index_document_by_id(
     )
     assert stats_v1.parse_run_id == parse_run.id
     stats_by_id = asyncio.run(
-        index_document(session, document_id, embedding_provider=provider, parse_run_id=run_v2.id)
+        index_document(session, document_id, embedding_provider=provider, parse_run_id=parse_run.id)
     )
-    assert stats_by_id.parse_run_id == run_v2.id
+    assert stats_by_id.parse_run_id == parse_run.id
 
 
 def test_index_document_sync_helper(
@@ -630,9 +630,9 @@ def test_index_document_sync_helper(
     stats_v1 = index_document_sync(session, document_id, embedding_provider=provider, version=1)
     assert stats_v1.parse_run_id == parse_run.id
     stats_by_id = index_document_sync(
-        session, document_id, embedding_provider=provider, parse_run_id=run_v2.id
+        session, document_id, embedding_provider=provider, parse_run_id=parse_run.id
     )
-    assert stats_by_id.parse_run_id == run_v2.id
+    assert stats_by_id.parse_run_id == parse_run.id
 
 
 def test_index_document_not_found_raises(session: Session) -> None:
