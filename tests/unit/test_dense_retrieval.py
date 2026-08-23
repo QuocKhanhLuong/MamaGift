@@ -14,7 +14,7 @@ from app.db import Base
 from app.models import Document
 from mamagift_contracts.embedding import EmbeddingResult
 from mamagift_retrieval.chunk import Chunk, ChunkType
-from mamagift_retrieval.index import IndexEntry, SqlDocumentIndex
+from mamagift_retrieval.index import AUTHORITATIVE_FAMILY_ID, IndexEntry, SqlDocumentIndex
 from mamagift_retrieval.providers import FakeEmbeddingProvider
 from mamagift_retrieval.scope import EvidenceScope
 from mamagift_retrieval.search import DenseRetriever, EmbeddingVersionMismatchError, ScoredChunk
@@ -101,7 +101,7 @@ def test_unambiguous_nearest_chunk_returned_first(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id=run_id,
@@ -168,7 +168,7 @@ def test_exact_cosine_ordering(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id=run_id,
@@ -245,7 +245,7 @@ def test_deterministic_ordering_and_stable_tie_break(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id=run_id,
@@ -317,7 +317,7 @@ def test_empty_index_and_empty_query(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id="run_empty",
@@ -357,7 +357,7 @@ def test_empty_index_and_empty_query(
         # 3. Index with 0 embedded chunks (embedded_chunks == 0)
         # returns [] without calling embed_query
         scope_no_emb = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=2,
             parse_run_id="run_no_emb",
@@ -396,7 +396,7 @@ def test_embedding_version_mismatch_surfaced(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id=run_id,
@@ -438,7 +438,7 @@ def test_embedding_result_version_mismatch_surfaced(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id=run_id,
@@ -491,19 +491,19 @@ def test_scope_isolation_document_and_version_and_parserun(
         _seed_document(session_factory, doc_b)
 
         scope_a_r1 = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_a,
             document_version=1,
             parse_run_id="run_a1",
         )
         scope_a_r2 = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_a,
             document_version=2,
             parse_run_id="run_a2",
         )
         scope_b_r1 = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_b,
             document_version=1,
             parse_run_id="run_b1",
@@ -576,7 +576,7 @@ def test_embed_query_is_called_not_embed_documents(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id="run_call",
@@ -624,13 +624,13 @@ def test_input_validations_raise(
 ) -> None:
     async def _test() -> None:
         scope_valid = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id="doc_val",
             document_version=1,
             parse_run_id="run_val",
         )
         scope_missing_doc = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_version=1,
             parse_run_id="run_val",
         )
@@ -657,7 +657,7 @@ def test_input_validations_raise(
 def test_provenance_contradiction_defense() -> None:
     async def _test() -> None:
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id="doc_orig",
             document_version=1,
             parse_run_id="run_orig",
@@ -704,7 +704,7 @@ def test_empty_embedding_vector_returns_empty(
         _seed_document(session_factory, doc_id)
 
         scope = EvidenceScope(
-            family_id="fam_01",
+            family_id=AUTHORITATIVE_FAMILY_ID,
             document_id=doc_id,
             document_version=1,
             parse_run_id="run_vec",
