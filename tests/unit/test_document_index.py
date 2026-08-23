@@ -14,6 +14,7 @@ from app.db import Base
 from app.models import Document, DocumentChunk
 from mamagift_retrieval.chunk import Chunk, ChunkType
 from mamagift_retrieval.index import (
+    AUTHORITATIVE_FAMILY_ID,
     DocumentIndex,
     IndexEntry,
     IndexStats,
@@ -97,7 +98,7 @@ def test_replace_and_stats(session_factory, index: SqlDocumentIndex) -> None:
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam_01",
+        family_id=AUTHORITATIVE_FAMILY_ID,
         document_id=doc_id,
         document_version=1,
         parse_run_id=run_id,
@@ -144,13 +145,13 @@ def test_family_isolation_across_all_methods(session_factory, index: SqlDocument
     _seed_document(session_factory, doc_id)
 
     scope_fam1 = EvidenceScope(
-        family_id="fam_01",
+        family_id=AUTHORITATIVE_FAMILY_ID,
         document_id=doc_id,
         document_version=1,
         parse_run_id="run_01",
     )
     scope_fam2 = EvidenceScope(
-        family_id="fam_02",
+        family_id="other_family",
         document_id=doc_id,
         document_version=1,
         parse_run_id="run_01",
@@ -166,16 +167,16 @@ def test_family_isolation_across_all_methods(session_factory, index: SqlDocument
     )
     index.replace(scope_fam1, [entry])
 
-    # Wrong family queries must return NOTHING
-    assert index.search_dense(scope_fam2, [1.0, 0.0], top_k=10) == []
-    assert index.search_lexical(scope_fam2, "Bí mật", top_k=10) == []
-    stats_fam2 = index.stats(scope_fam2)
-    assert stats_fam2.total_chunks == 0
-    assert stats_fam2.embedded_chunks == 0
-
-    # Wrong family drop must delete 0 rows
-    dropped = index.drop(scope_fam2)
-    assert dropped == 0
+    # A caller-supplied non-authoritative family is rejected loudly by every operation;
+    # returning an empty result would hide the same-family row under a fabricated scope.
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.search_dense(scope_fam2, [1.0, 0.0], top_k=10)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.search_lexical(scope_fam2, "Bí mật", top_k=10)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.stats(scope_fam2)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.drop(scope_fam2)
 
     # Correct family queries still reach the row
     dense_hits = index.search_dense(scope_fam1, [1.0, 0.0], top_k=10)
@@ -193,18 +194,57 @@ def test_family_isolation_across_all_methods(session_factory, index: SqlDocument
     assert index.stats(scope_fam1).total_chunks == 0
 
 
+def test_non_authoritative_family_rejected_by_every_method(
+    session_factory, index: SqlDocumentIndex
+) -> None:
+    """A family assertion must fail as a scope error, never become index identity."""
+    doc_id = "doc_non_authoritative_family"
+    _seed_document(session_factory, doc_id)
+
+    authoritative_scope = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=1,
+        parse_run_id="run_01",
+    )
+    non_authoritative_scope = authoritative_scope.model_copy(update={"family_id": "other_family"})
+    entry = IndexEntry(
+        chunk=_make_chunk("c1", doc_id, "run_01", 1, text="reviewer scenario"),
+        chunk_index=0,
+        embedding=[1.0, 0.0],
+        embedding_version="v1",
+    )
+    index.replace(authoritative_scope, [entry])
+
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.replace(non_authoritative_scope, [entry])
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.search_dense(non_authoritative_scope, [1.0, 0.0], top_k=10)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.search_lexical(non_authoritative_scope, "reviewer", top_k=10)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.drop(non_authoritative_scope)
+    with pytest.raises(ValueError, match="not authoritative"):
+        index.stats(non_authoritative_scope)
+
+    # The authoritative scope remains usable after all rejected attempts.
+    assert len(index.search_dense(authoritative_scope, [1.0, 0.0], top_k=10)) == 1
+    assert len(index.search_lexical(authoritative_scope, "reviewer", top_k=10)) == 1
+    assert index.stats(authoritative_scope).total_chunks == 1
+
+
 def test_version_isolation_between_parse_runs(session_factory, index: SqlDocumentIndex) -> None:
     doc_id = "doc_isolation_01"
     _seed_document(session_factory, doc_id)
 
     scope_run1 = EvidenceScope(
-        family_id="fam_01",
+        family_id=AUTHORITATIVE_FAMILY_ID,
         document_id=doc_id,
         document_version=1,
         parse_run_id="run_01",
     )
     scope_run2 = EvidenceScope(
-        family_id="fam_01",
+        family_id=AUTHORITATIVE_FAMILY_ID,
         document_id=doc_id,
         document_version=2,
         parse_run_id="run_02",
@@ -268,10 +308,16 @@ def test_cross_document_isolation(session_factory, index: SqlDocumentIndex) -> N
     _seed_document(session_factory, doc_b)
 
     scope_a = EvidenceScope(
-        family_id="fam_01", document_id=doc_a, document_version=1, parse_run_id="run_a"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_a,
+        document_version=1,
+        parse_run_id="run_a",
     )
     scope_b = EvidenceScope(
-        family_id="fam_01", document_id=doc_b, document_version=1, parse_run_id="run_b"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_b,
+        document_version=1,
+        parse_run_id="run_b",
     )
 
     ca = _make_chunk("ca", doc_a, "run_a", 1, text="Văn bản A bí mật")
@@ -306,10 +352,16 @@ def test_partial_scope_does_not_act_as_wildcard(session_factory, index: SqlDocum
     _seed_document(session_factory, doc_id)
 
     scope_r1 = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=1, parse_run_id="run_01"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=1,
+        parse_run_id="run_01",
     )
     scope_r2 = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=2, parse_run_id="run_02"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=2,
+        parse_run_id="run_02",
     )
 
     c1 = _make_chunk("c1", doc_id, "run_01", 1, text="Nội dung bản 1")
@@ -325,7 +377,7 @@ def test_partial_scope_does_not_act_as_wildcard(session_factory, index: SqlDocum
     )
 
     # An unpinned scope with unset document_version AND unset parse_run_id must REJECT
-    unpinned_scope = EvidenceScope(family_id="fam_01", document_id=doc_id)
+    unpinned_scope = EvidenceScope(family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id)
 
     with pytest.raises(ValueError, match="scope must specify parse_run_id or document_version"):
         index.search_dense(unpinned_scope, [1.0, 0.0], top_k=10)
@@ -348,17 +400,23 @@ def test_replace_under_unpinned_scope_rejected(session_factory, index: SqlDocume
     entry = IndexEntry(chunk=c, chunk_index=0)
 
     # Unset document_version
-    scope_no_ver = EvidenceScope(family_id="fam_01", document_id=doc_id, parse_run_id="run_01")
+    scope_no_ver = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, parse_run_id="run_01"
+    )
     with pytest.raises(ValueError, match="scope must specify document_version"):
         index.replace(scope_no_ver, [entry])
 
     # Unset parse_run_id
-    scope_no_run = EvidenceScope(family_id="fam_01", document_id=doc_id, document_version=1)
+    scope_no_run = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1
+    )
     with pytest.raises(ValueError, match="scope must specify parse_run_id"):
         index.replace(scope_no_run, [entry])
 
     # Unset document_id
-    scope_no_doc = EvidenceScope(family_id="fam_01", document_version=1, parse_run_id="run_01")
+    scope_no_doc = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID, document_version=1, parse_run_id="run_01"
+    )
     with pytest.raises(ValueError, match="scope must specify document_id"):
         index.replace(scope_no_doc, [entry])
 
@@ -368,7 +426,7 @@ def test_entry_provenance_contradiction_rejected(session_factory, index: SqlDocu
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam_01",
+        family_id=AUTHORITATIVE_FAMILY_ID,
         document_id=doc_id,
         document_version=1,
         parse_run_id="run_01",
@@ -419,10 +477,16 @@ def test_replace_is_atomic_and_leaves_other_runs_untouched(
     _seed_document(session_factory, doc_id)
 
     scope_r1 = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=1, parse_run_id="run_01"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=1,
+        parse_run_id="run_01",
     )
     scope_r2 = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=2, parse_run_id="run_02"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=2,
+        parse_run_id="run_02",
     )
 
     c1_1 = _make_chunk("c1_1", doc_id, "run_01", 1, text="r1 chunk 1")
@@ -480,7 +544,10 @@ def test_replace_is_genuinely_atomic_on_db_error(session_factory, index: SqlDocu
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=1, parse_run_id="run_01"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=1,
+        parse_run_id="run_01",
     )
     c1 = _make_chunk("c1_init", doc_id, "run_01", 1, text="initial chunk 1")
     c2 = _make_chunk("c2_init", doc_id, "run_01", 1, text="initial chunk 2")
@@ -513,13 +580,22 @@ def test_drop_removes_only_scoped_rows(session_factory, index: SqlDocumentIndex)
     _seed_document(session_factory, doc2)
 
     scope1_r1 = EvidenceScope(
-        family_id="fam", document_id=doc1, document_version=1, parse_run_id="d1_r1"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc1,
+        document_version=1,
+        parse_run_id="d1_r1",
     )
     scope1_r2 = EvidenceScope(
-        family_id="fam", document_id=doc1, document_version=2, parse_run_id="d1_r2"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc1,
+        document_version=2,
+        parse_run_id="d1_r2",
     )
     scope2_r1 = EvidenceScope(
-        family_id="fam", document_id=doc2, document_version=1, parse_run_id="d2_r1"
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc2,
+        document_version=1,
+        parse_run_id="d2_r1",
     )
 
     index.replace(
@@ -550,7 +626,7 @@ def test_dense_search_exact_cosine_ordering_and_stable_tie_break(
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     # query = [1.0, 0.0, 0.0]
@@ -610,7 +686,7 @@ def test_stale_embedding_version_exclusion(session_factory) -> None:
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     c1 = _make_chunk("c1", doc_id, "r1", text="Chunk v1")
@@ -680,7 +756,7 @@ def test_missing_and_zero_length_embedding_handling(
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     c_with = _make_chunk("c_with", doc_id, "r1", text="Văn bản quy định")
@@ -712,7 +788,7 @@ def test_dense_search_dimension_mismatch_raises(session_factory, index: SqlDocum
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
     c = _make_chunk("c1", doc_id, "r1")
     index.replace(
@@ -731,7 +807,7 @@ def test_exact_provenance_round_trip_no_substitution(
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam_01", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
     custom_blocks = ["block_custom_99", "block_custom_100"]
     custom_pages = [3, 7]
@@ -781,7 +857,7 @@ def test_lexical_search_scoring_and_stable_tie_break(
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     c1 = _make_chunk("c1", doc_id, "r1", text="Nghị định quy định chi tiết thi hành luật")
@@ -818,7 +894,7 @@ def test_empty_inputs_handling(session_factory, index: SqlDocumentIndex) -> None
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     # Empty index
@@ -837,10 +913,14 @@ def test_invalid_inputs_raise(session_factory, index: SqlDocumentIndex) -> None:
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
-    scope_no_doc = EvidenceScope(family_id="fam", document_version=1, parse_run_id="r1")
-    scope_no_run = EvidenceScope(family_id="fam", document_id=doc_id, document_version=1)
+    scope_no_doc = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID, document_version=1, parse_run_id="r1"
+    )
+    scope_no_run = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1
+    )
 
     c = _make_chunk("c1", doc_id, "r1")
 
@@ -876,7 +956,7 @@ def test_chunk_tree_validation_in_replace(session_factory, index: SqlDocumentInd
     _seed_document(session_factory, doc_id)
 
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
 
     # Chunk referencing non-existent parent
@@ -889,7 +969,7 @@ def test_session_types_support(db_engine, session_factory) -> None:
     doc_id = "doc_session_types"
     _seed_document(session_factory, doc_id)
     scope = EvidenceScope(
-        family_id="fam", document_id=doc_id, document_version=1, parse_run_id="r1"
+        family_id=AUTHORITATIVE_FAMILY_ID, document_id=doc_id, document_version=1, parse_run_id="r1"
     )
     c = _make_chunk("c1", doc_id, "r1", text="Test session types")
     entry = IndexEntry(chunk=c, chunk_index=0)

@@ -26,8 +26,20 @@ from mamagift_retrieval.chunk import Chunk, ChunkType, validate_chunk_tree
 from mamagift_retrieval.scope import EvidenceScope, scope_matches
 
 from .entries import IndexEntry, IndexStats, ScoredChunk
+from .protocol import AUTHORITATIVE_FAMILY_ID
 
 _TOKEN_RE = re.compile(r"[^\W\d_]+|\d+", re.UNICODE)
+
+
+def _validate_authoritative_family(scope: EvidenceScope) -> None:
+    if not scope.family_id:
+        raise ValueError("scope must specify family_id")
+    if scope.family_id != AUTHORITATIVE_FAMILY_ID:
+        raise ValueError(
+            f"scope family_id {scope.family_id!r} is not authoritative; "
+            f"expected {AUTHORITATIVE_FAMILY_ID!r}"
+        )
+
 
 _scope_metadata = MetaData()
 _document_scopes_table = Table(
@@ -154,8 +166,7 @@ class SqlDocumentIndex:
             )
 
     def replace(self, scope: EvidenceScope, entries: list[IndexEntry]) -> IndexStats:
-        if not scope.family_id:
-            raise ValueError("scope must specify family_id")
+        _validate_authoritative_family(scope)
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
         if scope.document_version is None:
@@ -243,7 +254,7 @@ class SqlDocumentIndex:
                     document_id=scope.document_id,
                     parse_run_id=scope.parse_run_id,
                     document_version=scope.document_version,
-                    family_id=scope.family_id,
+                    family_id=AUTHORITATIVE_FAMILY_ID,
                 )
                 session.execute(ins_scope)
 
@@ -309,8 +320,7 @@ class SqlDocumentIndex:
             raise ValueError("query_vector cannot be empty")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        if not scope.family_id:
-            raise ValueError("scope must specify family_id")
+        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
@@ -388,8 +398,7 @@ class SqlDocumentIndex:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        if not scope.family_id:
-            raise ValueError("scope must specify family_id")
+        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
@@ -456,8 +465,7 @@ class SqlDocumentIndex:
         """
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        if not scope.family_id:
-            raise ValueError("scope must specify family_id")
+        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
@@ -505,8 +513,7 @@ class SqlDocumentIndex:
         """Return indexing statistics for the scoped document version / parse run."""
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        if not scope.family_id:
-            raise ValueError("scope must specify family_id")
+        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 

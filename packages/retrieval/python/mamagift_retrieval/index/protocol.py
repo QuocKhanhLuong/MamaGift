@@ -9,6 +9,13 @@ from mamagift_retrieval.scope import EvidenceScope
 from .entries import IndexEntry, IndexStats, ScoredChunk
 
 
+# Phase 4 is deliberately single-family. Supporting more families requires a real
+# tenancy source; no authoritative family_id exists in the current documents/auth
+# model, and multi-family support is a Phase 5+ concern. Keep this explicit rather
+# than allowing a caller to manufacture family identity through an EvidenceScope.
+AUTHORITATIVE_FAMILY_ID = "mamagift"
+
+
 @runtime_checkable
 class DocumentIndex(Protocol):
     """Version-isolated, single-document index contract.
