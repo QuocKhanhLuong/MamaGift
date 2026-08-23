@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from typing import Any
 
 import httpx
@@ -29,6 +30,17 @@ class BgeM3EmbeddingProvider:
         endpoint: str = "/v1/embeddings",
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        if not base_url or not base_url.strip():
+            raise ValueError("base_url must not be empty")
+        if not model_id or not model_id.strip():
+            raise ValueError("model_id must not be empty")
+        if dimension <= 0:
+            raise ValueError(f"Dimension must be a positive integer, got {dimension}")
+        if not embedding_version or not embedding_version.strip():
+            raise ValueError("embedding_version must not be empty")
+        if timeout <= 0:
+            raise ValueError(f"Timeout must be positive, got {timeout}")
+
         self._base_url = base_url.rstrip("/")
         self._model_id = model_id
         self._dimension = dimension
@@ -75,7 +87,7 @@ class BgeM3EmbeddingProvider:
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: Any,
+        exc_tb: types.TracebackType | None,
     ) -> None:
         await self.close()
 
@@ -180,8 +192,28 @@ class BgeM3EmbeddingProvider:
                 status_code=502,
             ) from exc
 
-        vectors: list[list[float]] = []
+        # Surface metadata mismatch if reported at the top-level payload
+        if isinstance(resp_json, dict):
+            reported_model = resp_json.get("model")
+            if reported_model is not None and reported_model != self._model_id:
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Embedding model mismatch: expected '{self._model_id}', "
+                    f"received '{reported_model}'",
+                    retryable=False,
+                    status_code=502,
+                )
+            reported_version = resp_json.get("embedding_version")
+            if reported_version is not None and reported_version != self._embedding_version:
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Embedding version mismatch: expected '{self._embedding_version}', "
+                    f"received '{reported_version}'",
+                    retryable=False,
+                    status_code=502,
+                )
 
+        raw_items: list[Any]
         if isinstance(resp_json, dict) and "data" in resp_json:
             data = resp_json["data"]
             if not isinstance(data, list):
@@ -191,37 +223,9 @@ class BgeM3EmbeddingProvider:
                     retryable=False,
                     status_code=502,
                 )
-            # Sort by 'index' if provided to guarantee matching input order
-            if data and isinstance(data[0], dict) and "index" in data[0]:
-                sorted_items = sorted(data, key=lambda item: item.get("index", 0))
-            else:
-                sorted_items = data
-
-            for item in sorted_items:
-                if isinstance(item, dict) and "embedding" in item:
-                    vectors.append(item["embedding"])
-                elif isinstance(item, list):
-                    vectors.append(item)
-                else:
-                    raise WorkerError(
-                        WorkerErrorCode.UPSTREAM_ERROR,
-                        f"Unsupported embedding item in data: {type(item).__name__}",
-                        retryable=False,
-                        status_code=502,
-                    )
+            raw_items = data
         elif isinstance(resp_json, list):
-            for item in resp_json:
-                if isinstance(item, list):
-                    vectors.append(item)
-                elif isinstance(item, dict) and "embedding" in item:
-                    vectors.append(item["embedding"])
-                else:
-                    raise WorkerError(
-                        WorkerErrorCode.UPSTREAM_ERROR,
-                        f"Unsupported embedding item in list: {type(item).__name__}",
-                        retryable=False,
-                        status_code=502,
-                    )
+            raw_items = resp_json
         else:
             raise WorkerError(
                 WorkerErrorCode.UPSTREAM_ERROR,
@@ -230,15 +234,113 @@ class BgeM3EmbeddingProvider:
                 status_code=502,
             )
 
-        if len(vectors) != len(texts):
+        n_expected = len(texts)
+        if len(raw_items) != n_expected:
             raise WorkerError(
                 WorkerErrorCode.UPSTREAM_ERROR,
-                f"Embedding count mismatch: expected {len(texts)}, received {len(vectors)}",
+                f"Embedding count mismatch: expected {n_expected}, received {len(raw_items)}",
                 retryable=True,
                 status_code=502,
             )
 
-        for i, vec in enumerate(vectors):
+        # Check per-item indices if present.
+        # If any item carries an 'index', EVERY item must carry an integer index,
+        # and the indices must form an exact complete permutation of 0..N-1
+        # (no gaps, duplicates, or out-of-range values).
+        # If no items carry indices, arrival order is explicitly assumed to match
+        # input texts (item[i] -> texts[i]).
+        indexed_items: list[int] = []
+        for i, item in enumerate(raw_items):
+            if isinstance(item, dict) and "index" in item:
+                idx = item["index"]
+                if not isinstance(idx, int) or isinstance(idx, bool):
+                    raise WorkerError(
+                        WorkerErrorCode.UPSTREAM_ERROR,
+                        f"Embedding index at position {i} is not an integer: {idx!r}",
+                        retryable=False,
+                        status_code=502,
+                    )
+                indexed_items.append(idx)
+
+        sorted_items: list[Any]
+        if len(indexed_items) == n_expected:
+            # All items have indices: validate exact permutation of 0..N-1
+            expected_set = set(range(n_expected))
+            actual_set = set(indexed_items)
+            if actual_set != expected_set or len(indexed_items) != len(actual_set):
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Embedding response indices {indexed_items} do not form a complete "
+                    f"permutation of 0..{n_expected - 1}",
+                    retryable=False,
+                    status_code=502,
+                )
+            # Reorder items strictly according to their declared index
+            sorted_items = [None] * n_expected
+            for item in raw_items:
+                sorted_items[item["index"]] = item
+        elif len(indexed_items) == 0:
+            # No items carry an index: arrival order is explicitly assumed to correspond 1:1.
+            sorted_items = raw_items
+        else:
+            # Partial indices present (some items have index, others do not) - invalid payload
+            raise WorkerError(
+                WorkerErrorCode.UPSTREAM_ERROR,
+                f"Embedding response carries partial indices "
+                f"({len(indexed_items)}/{n_expected} items)",
+                retryable=False,
+                status_code=502,
+            )
+
+        vectors: list[list[float]] = []
+        for i, item in enumerate(sorted_items):
+            if isinstance(item, dict):
+                # Also check per-item model/version metadata if present
+                item_model = item.get("model")
+                if item_model is not None and item_model != self._model_id:
+                    raise WorkerError(
+                        WorkerErrorCode.UPSTREAM_ERROR,
+                        f"Embedding model mismatch at item {i}: expected '{self._model_id}', "
+                        f"received '{item_model}'",
+                        retryable=False,
+                        status_code=502,
+                    )
+                item_version = item.get("embedding_version")
+                if item_version is not None and item_version != self._embedding_version:
+                    raise WorkerError(
+                        WorkerErrorCode.UPSTREAM_ERROR,
+                        f"Embedding version mismatch at item {i}: "
+                        f"expected '{self._embedding_version}', received '{item_version}'",
+                        retryable=False,
+                        status_code=502,
+                    )
+
+                if "embedding" not in item:
+                    raise WorkerError(
+                        WorkerErrorCode.UPSTREAM_ERROR,
+                        f"Missing 'embedding' field in response item {i}",
+                        retryable=False,
+                        status_code=502,
+                    )
+                vec = item["embedding"]
+            elif isinstance(item, list):
+                vec = item
+            else:
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Unsupported embedding item at index {i}: {type(item).__name__}",
+                    retryable=False,
+                    status_code=502,
+                )
+
+            if not isinstance(vec, list):
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Embedding vector at index {i} must be a list, got {type(vec).__name__}",
+                    retryable=False,
+                    status_code=502,
+                )
+
             if len(vec) != self._dimension:
                 raise WorkerError(
                     WorkerErrorCode.UPSTREAM_ERROR,
@@ -247,6 +349,17 @@ class BgeM3EmbeddingProvider:
                     retryable=True,
                     status_code=502,
                 )
+
+            # Validate numeric elements
+            if not all(isinstance(val, (int, float)) and not isinstance(val, bool) for val in vec):
+                raise WorkerError(
+                    WorkerErrorCode.UPSTREAM_ERROR,
+                    f"Embedding vector at index {i} contains non-numeric values",
+                    retryable=False,
+                    status_code=502,
+                )
+
+            vectors.append([float(val) for val in vec])
 
         return EmbeddingResult(
             vectors=vectors,

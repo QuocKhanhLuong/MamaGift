@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+from typing import Any
 
 import httpx
 import pytest
@@ -103,6 +104,9 @@ def test_fake_embedding_determinism() -> None:
 
     assert res1.vectors[0] == res2.vectors[0]
     assert len(res1.vectors[0]) == provider.dimension
+    assert res1.embedding_version == provider.embedding_version
+    assert res1.model == provider.model_id
+    assert res1.dimension == provider.dimension
 
 
 def test_fake_embedding_distinctness_and_no_collision() -> None:
@@ -175,6 +179,12 @@ def test_fake_embedding_batch_behavior_n_one() -> None:
     assert len(res_batch.vectors) == 1
     assert len(res_query.vectors) == 1
     assert res_batch.vectors[0] == res_query.vectors[0]
+    assert res_batch.model == provider.model_id
+    assert res_batch.dimension == provider.dimension
+    assert res_batch.embedding_version == provider.embedding_version
+    assert res_query.model == provider.model_id
+    assert res_query.dimension == provider.dimension
+    assert res_query.embedding_version == provider.embedding_version
 
 
 def test_fake_embedding_batch_behavior_n_multiple_exact_order() -> None:
@@ -188,6 +198,9 @@ def test_fake_embedding_batch_behavior_n_multiple_exact_order() -> None:
 
     res_batch = asyncio.run(provider.embed_documents(texts))
     assert len(res_batch.vectors) == 4
+    assert res_batch.model == provider.model_id
+    assert res_batch.dimension == provider.dimension
+    assert res_batch.embedding_version == provider.embedding_version
 
     for i, t in enumerate(texts):
         res_single = asyncio.run(provider.embed_query(t))
@@ -209,6 +222,32 @@ def test_bge_m3_provider_properties_and_defaults() -> None:
     assert provider.model_id == "BAAI/bge-m3"
     assert provider.dimension == 1024
     assert provider.embedding_version == "bge-m3-v1.2"
+
+
+def test_bge_m3_constructor_validation() -> None:
+    with pytest.raises(ValueError, match="base_url must not be empty"):
+        BgeM3EmbeddingProvider(base_url="")
+
+    with pytest.raises(ValueError, match="base_url must not be empty"):
+        BgeM3EmbeddingProvider(base_url="   ")
+
+    with pytest.raises(ValueError, match="model_id must not be empty"):
+        BgeM3EmbeddingProvider(base_url="http://mock", model_id="")
+
+    with pytest.raises(ValueError, match="Dimension must be a positive integer"):
+        BgeM3EmbeddingProvider(base_url="http://mock", dimension=0)
+
+    with pytest.raises(ValueError, match="Dimension must be a positive integer"):
+        BgeM3EmbeddingProvider(base_url="http://mock", dimension=-10)
+
+    with pytest.raises(ValueError, match="embedding_version must not be empty"):
+        BgeM3EmbeddingProvider(base_url="http://mock", embedding_version="")
+
+    with pytest.raises(ValueError, match="Timeout must be positive"):
+        BgeM3EmbeddingProvider(base_url="http://mock", timeout=0)
+
+    with pytest.raises(ValueError, match="Timeout must be positive"):
+        BgeM3EmbeddingProvider(base_url="http://mock", timeout=-5.0)
 
 
 def test_bge_m3_build_url_variations() -> None:
@@ -241,10 +280,13 @@ def test_bge_m3_batch_n_zero_no_network_call() -> None:
                 base_url="http://mock",
                 client=client,
                 dimension=1024,
+                embedding_version="bge-m3-v1",
             )
             res = await provider.embed_documents([])
             assert res.vectors == []
             assert res.dimension == 1024
+            assert res.model == "bge-m3"
+            assert res.embedding_version == "bge-m3-v1"
             assert not called
 
     asyncio.run(_test())
@@ -260,6 +302,7 @@ def test_bge_m3_batch_n_one_and_query() -> None:
             json={
                 "data": [{"index": 0, "embedding": [0.1] * 1024}],
                 "model": "bge-m3",
+                "embedding_version": "bge-m3-v1",
             },
         )
 
@@ -271,6 +314,7 @@ def test_bge_m3_batch_n_one_and_query() -> None:
                 base_url="http://mock",
                 client=client,
                 auth_token="secret-token",
+                embedding_version="bge-m3-v1",
             )
             res = await provider.embed_query("truy vấn kiểm tra")
 
@@ -278,6 +322,7 @@ def test_bge_m3_batch_n_one_and_query() -> None:
             assert len(res.vectors[0]) == 1024
             assert res.model == "bge-m3"
             assert res.dimension == 1024
+            assert res.embedding_version == "bge-m3-v1"
 
             assert len(captured_requests) == 1
             assert captured_requests[0].headers["Authorization"] == "Bearer secret-token"
@@ -306,6 +351,7 @@ def test_bge_m3_batch_ordering_and_sorting_by_index() -> None:
                     {"index": 1, "embedding": vec1},
                 ],
                 "model": "bge-m3",
+                "embedding_version": "bge-m3-v1",
             },
         )
 
@@ -316,14 +362,18 @@ def test_bge_m3_batch_ordering_and_sorting_by_index() -> None:
             provider = BgeM3EmbeddingProvider(
                 base_url="http://mock",
                 client=client,
+                embedding_version="bge-m3-v1",
             )
             res = await provider.embed_documents(["doc0", "doc1", "doc2"])
 
             assert len(res.vectors) == 3
-            # Must be sorted in order 0, 1, 2
+            # Must be sorted strictly in order 0, 1, 2 matching input texts
             assert res.vectors[0] == vec0
             assert res.vectors[1] == vec1
             assert res.vectors[2] == vec2
+            assert res.model == "bge-m3"
+            assert res.dimension == 1024
+            assert res.embedding_version == "bge-m3-v1"
 
     asyncio.run(_test())
 
@@ -345,11 +395,458 @@ def test_bge_m3_direct_list_response_format() -> None:
             provider = BgeM3EmbeddingProvider(
                 base_url="http://mock",
                 client=client,
+                embedding_version="bge-m3-v1",
             )
             res = await provider.embed_documents(["t0", "t1"])
             assert res.vectors == [vec0, vec1]
+            assert res.model == "bge-m3"
+            assert res.dimension == 1024
+            assert res.embedding_version == "bge-m3-v1"
 
     asyncio.run(_test())
+
+
+def test_bge_m3_duplicate_and_empty_text_inputs() -> None:
+    vec0 = [0.1] * 1024
+    vec1 = [0.2] * 1024
+    vec2 = [0.3] * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": vec0},
+                    {"index": 1, "embedding": vec1},
+                    {"index": 2, "embedding": vec2},
+                ],
+                "model": "bge-m3",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            # Duplicate text and empty text
+            res = await provider.embed_documents(["duplicate", "", "duplicate"])
+            assert len(res.vectors) == 3
+            assert res.vectors[0] == vec0
+            assert res.vectors[1] == vec1
+            assert res.vectors[2] == vec2
+
+    asyncio.run(_test())
+
+
+# -----------------------------------------------------------------------------
+# 4. Upstream Response Strict Validation Tests
+# -----------------------------------------------------------------------------
+
+
+def test_bge_m3_error_fewer_embeddings_than_inputs() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Returned 1 vector when 2 were requested
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"index": 0, "embedding": [0.1] * 1024}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1", "t2"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "Embedding count mismatch: expected 2, received 1" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_more_embeddings_than_inputs() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Returned 3 vectors when 2 were requested
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.1] * 1024},
+                    {"index": 1, "embedding": [0.2] * 1024},
+                    {"index": 2, "embedding": [0.3] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1", "t2"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "Embedding count mismatch: expected 2, received 3" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_empty_data_for_nonempty_inputs() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": []})
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1", "t2"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "Embedding count mismatch: expected 2, received 0" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_duplicate_indices() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.1] * 1024},
+                    {"index": 0, "embedding": [0.2] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "do not form a complete permutation" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_gap_in_indices() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.1] * 1024},
+                    {"index": 2, "embedding": [0.2] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "do not form a complete permutation" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_out_of_range_index() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": -1, "embedding": [0.1] * 1024},
+                    {"index": 0, "embedding": [0.2] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "do not form a complete permutation" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_partial_indices() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # First item has index, second item lacks index
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.1] * 1024},
+                    {"embedding": [0.2] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "carries partial indices" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_non_integer_index() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": "0", "embedding": [0.1] * 1024},
+                    {"index": 1, "embedding": [0.2] * 1024},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "is not an integer" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_ragged_dimension() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # First vector 1024-dim, second vector 512-dim
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 0, "embedding": [0.1] * 1024},
+                    {"index": 1, "embedding": [0.2] * 512},
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client, dimension=1024)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t0", "t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding dimension mismatch at index 1: expected 1024, received 512"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_wrong_dimension() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Returned 512 dimension when 1024 was declared
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"index": 0, "embedding": [0.1] * 512}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client, dimension=1024)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding dimension mismatch at index 0: expected 1024, received 512"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_model_mismatch_top_level() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "text-embedding-ada-002",
+                "data": [{"index": 0, "embedding": [0.1] * 1024}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(
+                base_url="http://mock", client=client, model_id="bge-m3"
+            )
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding model mismatch: expected 'bge-m3', received 'text-embedding-ada-002'"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_model_mismatch_item_level() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"index": 0, "model": "other-bge", "embedding": [0.1] * 1024}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(
+                base_url="http://mock", client=client, model_id="bge-m3"
+            )
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding model mismatch at item 0: expected 'bge-m3', received 'other-bge'"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_embedding_version_mismatch_top_level() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "embedding_version": "bge-m3-v2",
+                "data": [{"index": 0, "embedding": [0.1] * 1024}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(
+                base_url="http://mock", client=client, embedding_version="bge-m3-v1"
+            )
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding version mismatch: expected 'bge-m3-v1', received 'bge-m3-v2'"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_embedding_version_mismatch_item_level() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"index": 0, "embedding_version": "bge-m3-v2", "embedding": [0.1] * 1024}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(
+                base_url="http://mock", client=client, embedding_version="bge-m3-v1"
+            )
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert (
+                "Embedding version mismatch at item 0: expected 'bge-m3-v1', received 'bge-m3-v2'"
+                in exc_info.value.message
+            )
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_missing_embedding_field() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"index": 0}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "Missing 'embedding' field" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+def test_bge_m3_error_non_numeric_vector_element() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        invalid_vec: list[Any] = [0.1] * 1024
+        invalid_vec[5] = "not-a-number"
+        return httpx.Response(
+            200,
+            json={"data": [{"index": 0, "embedding": invalid_vec}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    async def _test() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
+            with pytest.raises(WorkerError) as exc_info:
+                await provider.embed_documents(["t1"])
+            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
+            assert "contains non-numeric values" in exc_info.value.message
+
+    asyncio.run(_test())
+
+
+# -----------------------------------------------------------------------------
+# 5. Network & HTTP Status Error Tests
+# -----------------------------------------------------------------------------
 
 
 def test_bge_m3_unauthorized_error() -> None:
@@ -507,52 +1004,6 @@ def test_bge_m3_invalid_response_structure() -> None:
             with pytest.raises(WorkerError) as exc_info:
                 await provider.embed_documents(["test"])
             assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
-
-    asyncio.run(_test())
-
-
-def test_bge_m3_vector_count_mismatch() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        # Returned 1 vector when 2 were requested
-        return httpx.Response(
-            200,
-            json={
-                "data": [{"index": 0, "embedding": [0.1] * 1024}],
-            },
-        )
-
-    transport = httpx.MockTransport(handler)
-
-    async def _test() -> None:
-        async with httpx.AsyncClient(transport=transport) as client:
-            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client)
-            with pytest.raises(WorkerError) as exc_info:
-                await provider.embed_documents(["t1", "t2"])
-            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
-            assert "Embedding count mismatch" in exc_info.value.message
-
-    asyncio.run(_test())
-
-
-def test_bge_m3_dimension_mismatch() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        # Returned 512 dimension when 1024 was declared
-        return httpx.Response(
-            200,
-            json={
-                "data": [{"index": 0, "embedding": [0.1] * 512}],
-            },
-        )
-
-    transport = httpx.MockTransport(handler)
-
-    async def _test() -> None:
-        async with httpx.AsyncClient(transport=transport) as client:
-            provider = BgeM3EmbeddingProvider(base_url="http://mock", client=client, dimension=1024)
-            with pytest.raises(WorkerError) as exc_info:
-                await provider.embed_documents(["t1"])
-            assert exc_info.value.code == WorkerErrorCode.UPSTREAM_ERROR
-            assert "Embedding dimension mismatch" in exc_info.value.message
 
     asyncio.run(_test())
 
