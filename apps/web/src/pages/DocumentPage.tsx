@@ -72,7 +72,7 @@ export function DocumentPage() {
 
       <div className="min-h-0 flex-1">
         {ready ? (
-          <DocumentWorkspace documentId={documentId!} />
+          <DocumentWorkspace documentId={documentId!} document={document} />
         ) : (
           <>
             <ProcessingStatus

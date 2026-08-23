@@ -1,26 +1,47 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { API_BASE_URL } from "../../api/client";
-import type { QaStatus } from "../../api/types";
-import { makeDocumentSummary } from "../../test/fixtures";
+import type { QaCitation, QaResponse, QaStatus } from "../../api/types";
+import { makeCanonicalDocument, makeDocumentSummary } from "../../test/fixtures";
 import { server } from "../../test/server";
 import { AssistantPanel } from "./AssistantPanel";
 
-function qaResponse(status: QaStatus, answer = "Nhà trường cần thực hiện theo văn bản.") {
+function qaResponse(
+  status: QaStatus,
+  answer = "Nhà trường cần thực hiện theo văn bản.",
+  citations: QaCitation[] = [],
+): QaResponse {
   return {
     answer,
     status,
-    citations: [],
+    citations,
     retrieval: { query_id: "qry_1" },
     model: { provider: "fake", model: "fake-model", version: "1" },
   };
 }
 
-function renderPanel(status: string = "READY") {
-  return render(<AssistantPanel document={makeDocumentSummary({ status: status as never })} />);
+const citation1: QaCitation = {
+  citation_id: "c1",
+  document_id: "doc_1",
+  page_number: 2,
+  block_ids: ["b_2_0007"],
+  quote: "Hạn hoàn thành trước ngày 25 tháng 8 năm 2026",
+};
+
+function renderPanel(
+  status: string = "READY",
+  props: Partial<Parameters<typeof AssistantPanel>[0]> = {},
+) {
+  return render(
+    <AssistantPanel
+      document={makeDocumentSummary({ status: status as never })}
+      sourcePages={makeCanonicalDocument().pages}
+      {...props}
+    />,
+  );
 }
 
 describe("AssistantPanel", () => {
@@ -52,13 +73,15 @@ describe("AssistantPanel", () => {
     );
   });
 
-  it("submits a question through the document QA endpoint and renders the answer", async () => {
+  it("submits a question through the document QA endpoint and renders the answer via AnswerView", async () => {
     const user = userEvent.setup();
     let requestBody: unknown;
     server.use(
       http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, async ({ request }) => {
         requestBody = await request.json();
-        return HttpResponse.json(qaResponse("answered", "Câu trả lời có căn cứ."));
+        return HttpResponse.json(
+          qaResponse("answered", "Câu trả lời có căn cứ. [c1]", [citation1]),
+        );
       }),
     );
     renderPanel();
@@ -66,26 +89,84 @@ describe("AssistantPanel", () => {
     await user.type(screen.getByRole("textbox", { name: "Câu hỏi" }), "Văn bản yêu cầu gì?");
     await user.click(screen.getByRole("button", { name: "Gửi câu hỏi" }));
 
-    expect(await screen.findByText("Câu trả lời có căn cứ.")).toBeInTheDocument();
+    expect(await screen.findByText(/Câu trả lời có căn cứ./)).toBeInTheDocument();
+    expect(screen.getByTestId("citation-chip-c1")).toBeInTheDocument();
     expect(requestBody).toEqual({ question: "Văn bản yêu cầu gì?" });
   });
 
-  it.each([
-    ["answered", "Đã có câu trả lời"],
-    ["insufficient_evidence", "Chưa đủ căn cứ"],
-    ["ai_worker_unavailable", "Trợ lý tạm thời không hoạt động"],
-    ["failed", "Chưa hoàn thành"],
-  ] as const)("renders the %s response state", async (status, label) => {
+  it("invokes onCitationNavigate when a citation chip in the answer is clicked", async () => {
+    const user = userEvent.setup();
+    const onCitationNavigate = vi.fn();
     server.use(
       http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, () =>
-        HttpResponse.json(qaResponse(status)),
+        HttpResponse.json(qaResponse("answered", "Căn cứ theo [c1]", [citation1])),
+      ),
+    );
+    renderPanel("READY", { onCitationNavigate });
+
+    await user.type(screen.getByRole("textbox", { name: "Câu hỏi" }), "Hạn nộp?");
+    await user.click(screen.getByRole("button", { name: "Gửi câu hỏi" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Đi tới nguồn · Trang 2" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Đi tới nguồn · Trang 2" }));
+
+    expect(onCitationNavigate).toHaveBeenCalledWith(2, ["b_2_0007"], citation1);
+  });
+
+  it("renders the answered response through AnswerView", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, () =>
+        HttpResponse.json(qaResponse("answered", "Nội dung trả lời chính xác.")),
       ),
     );
     renderPanel();
     await userEvent.setup().click(screen.getByRole("button", { name: "Tóm tắt" }));
 
-    expect(await screen.findByText(label)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText(label)).toBeInTheDocument());
+    expect(await screen.findByText("Nội dung trả lời chính xác.")).toBeInTheDocument();
+    expect(document.querySelector("[data-answer-view]")).toBeInTheDocument();
+  });
+
+  it("renders the insufficient_evidence response state through AssistantStates", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, () =>
+        HttpResponse.json(qaResponse("insufficient_evidence", "")),
+      ),
+    );
+    renderPanel();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Tóm tắt" }));
+
+    expect(await screen.findByTestId("assistant-insufficient-evidence")).toBeInTheDocument();
+    expect(screen.getByText("Chưa tìm thấy câu trả lời trong văn bản này")).toBeInTheDocument();
+  });
+
+  it("renders the ai_worker_unavailable response state through AssistantStates", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, () =>
+        HttpResponse.json(qaResponse("ai_worker_unavailable", "")),
+      ),
+    );
+    renderPanel();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Tóm tắt" }));
+
+    expect(await screen.findByTestId("assistant-ai-worker-unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/Trợ lý đang tạm thời không kết nối được/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+  });
+
+  it("renders the failed response state through AssistantStates", async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/documents/doc_1/qa`, () =>
+        HttpResponse.json(qaResponse("failed", "")),
+      ),
+    );
+    renderPanel();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Tóm tắt" }));
+
+    expect(await screen.findByTestId("assistant-failed")).toBeInTheDocument();
+    expect(screen.getByText(/Trợ lý chưa thể hoàn thành câu trả lời lúc này/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
 
   it.each([

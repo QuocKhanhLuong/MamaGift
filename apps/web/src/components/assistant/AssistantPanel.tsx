@@ -1,12 +1,14 @@
 import { ArrowUp, FileText } from "lucide-react";
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 
-import type { DocumentSummary, QaResponse, QaStatus } from "../../api/types";
+import type { CanonicalPage, DocumentSummary, QaCitation, QaResponse } from "../../api/types";
 import { Button } from "../ui/Button";
 import { Textarea } from "../ui/Input";
 import { cn } from "../../lib/cn";
 import { DOCUMENT_STATUS_LABEL } from "../../lib/status";
 import { qaErrorMessage, useQa } from "../../hooks/useQa";
+import { AnswerView } from "./AnswerView";
+import { AssistantStates } from "./AssistantStates";
 
 export const QUICK_QUESTIONS = [
   { label: "Tóm tắt", question: "Tóm tắt văn bản này." },
@@ -15,29 +17,15 @@ export const QUICK_QUESTIONS = [
   { label: "Đối tượng áp dụng?", question: "Đối tượng nào áp dụng theo văn bản này?" },
 ] as const;
 
-const QA_STATUS_COPY: Record<QaStatus, { label: string; description: string }> = {
-  answered: {
-    label: "Đã có câu trả lời",
-    description: "Câu trả lời được tìm trong văn bản đã chọn.",
-  },
-  insufficient_evidence: {
-    label: "Chưa đủ căn cứ",
-    description: "Chưa tìm thấy đủ căn cứ trong văn bản để trả lời chắc chắn câu hỏi này.",
-  },
-  ai_worker_unavailable: {
-    label: "Trợ lý tạm thời không hoạt động",
-    description: "Bạn vẫn có thể xem văn bản gốc và thử lại sau.",
-  },
-  failed: {
-    label: "Chưa hoàn thành",
-    description: "Chưa thể hoàn thành câu trả lời. Vui lòng thử lại.",
-  },
-};
-
 export interface AssistantPanelProps {
   document: DocumentSummary | null;
   className?: string;
   onChooseDocument?: () => void;
+  /** Canonical pages for citation resolution and validation. */
+  sourcePages?: readonly CanonicalPage[];
+  /** Citation navigation callback to drive SourceViewer to page and block(s). */
+  onCitationNavigate?: (page: number, blockIds: string[], citation: QaCitation) => void;
+  onCitationClick?: (citation: QaCitation) => void;
   /** G2 can replace the default prose view with answer and citation rendering. */
   renderAnswer?: (response: QaResponse, question: string) => ReactNode;
   /** G3 can replace the minimal status fallback with its dedicated state view. */
@@ -48,21 +36,14 @@ function documentLabel(document: DocumentSummary): string {
   return document.document_number ?? document.title ?? document.filename;
 }
 
-function statusFallback(response: QaResponse): ReactNode {
-  const copy = QA_STATUS_COPY[response.status];
-  return (
-    <div className="flex flex-col gap-1" data-qa-status={response.status} role="status">
-      <p className="font-medium text-mg-text">{copy.label}</p>
-      <p className="text-sm text-mg-text-muted">{copy.description}</p>
-    </div>
-  );
-}
-
-/** G1 — document-gated assistant shell; answer/citation and failure views remain slots for G2/G3. */
+/** G1 — document-gated assistant shell; answer/citation and failure views wired with G2/G3. */
 export function AssistantPanel({
   document,
   className,
   onChooseDocument,
+  sourcePages,
+  onCitationNavigate,
+  onCitationClick,
   renderAnswer,
   renderResponseState,
 }: AssistantPanelProps) {
@@ -159,21 +140,33 @@ export function AssistantPanel({
               </div>
             ) : null}
             {state.kind === "success" ? (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4" data-qa-status={state.response.status}>
                 <div className="self-end rounded-mg-lg bg-mg-surface-2 px-4 py-3 text-mg-text">
                   {state.question}
                 </div>
-                {renderResponseState
-                  ? renderResponseState(state.response, state.question)
-                  : statusFallback(state.response)}
+                {renderResponseState ? (
+                  renderResponseState(state.response, state.question)
+                ) : state.response.status !== "answered" ? (
+                  <AssistantStates
+                    status={state.response.status}
+                    onRetry={() => void ask(state.question)}
+                  />
+                ) : null}
                 {state.response.status === "answered" && state.response.answer ? (
                   <div
                     className="whitespace-pre-wrap text-[16px] leading-relaxed text-mg-text"
                     data-answer-slot
                   >
-                    {renderAnswer
-                      ? renderAnswer(state.response, state.question)
-                      : state.response.answer}
+                    {renderAnswer ? (
+                      renderAnswer(state.response, state.question)
+                    ) : (
+                      <AnswerView
+                        response={state.response}
+                        sourcePages={sourcePages}
+                        onCitationNavigate={onCitationNavigate}
+                        onCitationClick={onCitationClick}
+                      />
+                    )}
                   </div>
                 ) : null}
               </div>

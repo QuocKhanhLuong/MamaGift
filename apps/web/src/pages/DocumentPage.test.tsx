@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { DocumentPage } from "./DocumentPage";
 import { server } from "../test/server";
@@ -30,6 +30,10 @@ function renderDocumentPage() {
 }
 
 describe("DocumentPage (API integration)", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+  });
+
   it("shows the failed-processing UI for a terminal parse failure", async () => {
     server.use(statusHandler("PARSE_FAILED"));
     renderDocumentPage();
@@ -83,5 +87,93 @@ describe("DocumentPage (API integration)", () => {
 
     expect(await screen.findByText("Không tìm thấy văn bản.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+  });
+
+  it("mounts the workspace with the assistant entry point for a READY document", async () => {
+    server.use(
+      statusHandler("READY"),
+      http.get(`${API_BASE_URL}/api/v1/documents`, () =>
+        HttpResponse.json({ items: [], total: 0, limit: 20, offset: 0 }),
+      ),
+      http.get(`${API_BASE_URL}/api/v1/documents/doc_1/canonical`, () =>
+        HttpResponse.json({
+          parse_run: {
+            id: "prun_1",
+            document_id: "doc_1",
+            version: 1,
+            is_current: true,
+            parser_name: "pymupdf",
+            parser_version: "1.0",
+            configuration_hash: "hash",
+            strategy_decided: false,
+            degraded: true,
+            route: "born_digital",
+            schema_version: "1.0",
+            quality_report: {},
+            started_at: "2026-08-14T00:00:00Z",
+            finished_at: "2026-08-14T00:00:01Z",
+          },
+          canonical: {
+            schema_version: "1.0",
+            document_id: "doc_1",
+            parser_run: { id: "prun_1", started_at: "", finished_at: "" },
+            metadata: {},
+            pages: [{ page_number: 1, width: 595, height: 842, rotation: 0, blocks: [] }],
+            hierarchy: [],
+            tables: [],
+            extracted_fields: [],
+            quality_report: {},
+          },
+        }),
+      ),
+    );
+    renderDocumentPage();
+
+    expect(await screen.findByRole("tab", { name: "Trợ lý" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Chi tiết" })).toBeInTheDocument();
+  });
+
+  it("mounts the workspace without the assistant entry point for a READY_FOR_REVIEW document", async () => {
+    server.use(
+      statusHandler("READY_FOR_REVIEW"),
+      http.get(`${API_BASE_URL}/api/v1/documents`, () =>
+        HttpResponse.json({ items: [], total: 0, limit: 20, offset: 0 }),
+      ),
+      http.get(`${API_BASE_URL}/api/v1/documents/doc_1/canonical`, () =>
+        HttpResponse.json({
+          parse_run: {
+            id: "prun_1",
+            document_id: "doc_1",
+            version: 1,
+            is_current: true,
+            parser_name: "pymupdf",
+            parser_version: "1.0",
+            configuration_hash: "hash",
+            strategy_decided: false,
+            degraded: true,
+            route: "born_digital",
+            schema_version: "1.0",
+            quality_report: {},
+            started_at: "2026-08-14T00:00:00Z",
+            finished_at: "2026-08-14T00:00:01Z",
+          },
+          canonical: {
+            schema_version: "1.0",
+            document_id: "doc_1",
+            parser_run: { id: "prun_1", started_at: "", finished_at: "" },
+            metadata: {},
+            pages: [{ page_number: 1, width: 595, height: 842, rotation: 0, blocks: [] }],
+            hierarchy: [],
+            tables: [],
+            extracted_fields: [],
+            quality_report: {},
+          },
+        }),
+      ),
+    );
+    renderDocumentPage();
+
+    expect(await screen.findByText("Trang 1 / 1")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Trợ lý" })).not.toBeInTheDocument();
   });
 });
