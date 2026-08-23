@@ -4,12 +4,16 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
-**Phase 3.5 — Evaluation + Retrieval Foundation**
+**Phase 4 — Self-hosted LLM and grounded single-document Q&A**
 
-Status: `COMPLETE` (see the exit-evidence entry at the end of this file)
+Status: `COMPLETE_WITH_EXTERNAL_OCR_BLOCKER` (see the exit-evidence entry at the end
+of this file)
 
-Phase 3 remains `IN_PROGRESS` — it inherits Phase 1/2's undecided parser strategy —
-and Phase 4 is now `BLOCKED_BY_PHASE_3.5` rather than `BLOCKED_BY_PHASE_3`.
+Grounded single-document Q&A works end to end with verifiable page/block citations,
+and every Phase 4 gate is green. It is **not** unqualified `COMPLETE`: every fixture
+proving it is born-digital or synthetic, because the PP-StructureV3/OCR blocker means
+a real scanned Vietnamese document still yields no critical fields. Phases 1, 2 and 3
+remain `IN_PROGRESS` for that same reason.
 
 ### Previously active phase
 
@@ -84,7 +88,7 @@ production parser. Running the private benchmark is what closes both phases.
 | 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Commit `fc71f8b`; ingestion pipeline, APIs, schema, admin parser and local Phase 2 gates complete; production parser strategy still blocked on ADR-001 |
 | 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`/`c75c489`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
 | 3.5 | Evaluation + Retrieval Foundation | COMPLETE | see entry below; deterministic foundation only — no embeddings, vector store, reranker, memory backend or LLM |
-| 4 | Self-hosted LLM and grounded single-document Q&A | BLOCKED_BY_PHASE_3.5 | — |
+| 4 | Self-hosted LLM and grounded single-document Q&A | COMPLETE_WITH_EXTERNAL_OCR_BLOCKER | see entry below; grounded QA green end to end on born-digital/synthetic fixtures only |
 | 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
 | 7 | Production hardening and low-cost deployment | BLOCKED_BY_PHASE_6 | — |
@@ -405,3 +409,123 @@ its own format.
 1. Wire `retrieval-eval-tests` into `.github/workflows/ci.yml`.
 2. Resolve the OCR blocker before any claim about real scanned documents; until
    then every Phase 4 fixture is born-digital or synthetic.
+
+### Phase 4 completed (with external OCR blocker) — 2026-08-24
+
+- Commit/PR: merged locally into `main` as `274bf50..715412c` (74 commits, 105 files,
+  +19987/-122). **Not pushed to `origin/main`.** No PR was opened.
+- Test commands: `make check` — **EXIT 0**. Inside that run: backend `pytest -q`
+  **1033 passed / 1 skipped**; the four Phase 3.5+4 gates `retrieval-eval-tests` 229,
+  `ai-worker-contract` 130, `rag-unit-tests` 78, `rag-eval-mini` 54; parser-contract
+  702, benchmark smoke 12, ingestion 220, admin golden 15, migrations 20, feedback 14;
+  frontend **78 passed** across 13 files; `vite build` succeeded; Compose validated;
+  Playwright **12/12 passed**. `mypy` clean across 103 source files; `ruff check`,
+  `ruff format --check` and `git diff --check` clean.
+- CI status: **not verified remotely.** Four jobs were added to
+  `.github/workflows/ci.yml` — `retrieval-eval-tests` (the carried-forward Phase 3.5
+  follow-up), `ai-worker-contract`, `rag-unit-tests` and `rag-eval-mini` — bringing the
+  workflow to 18 jobs. Their definitions are present and each passes locally; no remote
+  run ID is claimed.
+- ADR/benchmark artifacts: none. ADR-001 remains `PENDING EVIDENCE` and was not touched.
+
+#### Delivered
+
+- `services/ai-worker`: an authenticated worker service with `/internal/v1/health`
+  that reports honestly — a worker with no backing model advertises `offline` with all
+  capabilities false, so acceptance CASE 7 is meaningful.
+- `mamagift_contracts`: LLM, embedding and rerank DTOs plus a structured worker-error
+  contract.
+- `mamagift_retrieval` (Phase 4 additions): OpenAI-compatible chat adapter and BGE-M3
+  embedding adapter, each with a deterministic fake; a single-document, version-keyed
+  `DocumentIndex`; Vietnamese BM25 lexical retrieval; dense retrieval; rank-only
+  Reciprocal Rank Fusion (k=60); a provider-neutral reranker seam; ancestor-only
+  evidence expansion; and bounded evidence assembly.
+- `mamagift_rag`: the grounded prompt contract, the answer schema, citation allow-list
+  validation, abstention, prompt-injection defences, and `QaService`.
+- `services/api`: the `document_chunks` table and migration `0004`, the runtime
+  indexing pipeline (`READY_FOR_REVIEW -> INDEXING -> READY`), and
+  `POST /api/v1/documents/{id}/qa`.
+- `apps/web`: the Trợ lý assistant panel with the four quick questions, answer
+  rendering with citation chips that navigate to the exact source page and block, and
+  the full set of offline/indexing/insufficient-evidence/failure states.
+- `mamagift_eval` (Phase 4 additions): the single-document retrieval harness
+  (Recall@1/3/5/10, MRR, nDCG, exact document-number, latency), MamaGift
+  answer-quality metrics, per-question failure analysis, and the offline RAGAS adapter.
+
+#### Architectural decision recorded here
+
+**No vector database.** Retrieval is scoped to one document version, which produces
+10^1–10^2 chunks, so exact brute-force cosine is both correct and cheaper than any ANN
+index, with no extra service and no migration risk. pgvector is an explicit Phase 5
+deliverable and was deliberately not pulled forward. The `DocumentIndex` Protocol is
+the seam Phase 5 swaps.
+
+#### E2E acceptance cases (all seven executing the real pipeline)
+
+Fake LLM and fake embeddings only; chunking, retrieval, fusion, reranking, evidence
+assembly and citation validation are all real.
+
+| Case | Proves | Status |
+|---|---|---|
+| 1 | Exact fact; citation resolves to the correct block; clicking it opens that source | PASS (API + browser) |
+| 2 | `Kế hoạch` task-local owner/deadline, with cross-association asserted absent | PASS |
+| 3 | Điều/Khoản/Điểm hierarchy retrieval | PASS |
+| 4 | Absent fact abstains with zero citations | PASS (API + browser) |
+| 5 | Prompt injection treated as source text only | PASS (API + browser) |
+| 6 | Current-version query cannot reach stale parse-run evidence | PASS (API + browser) |
+| 7 | Worker offline: document intact, understandable retry state | PASS (API + browser) |
+
+#### How it was verified, and the honest limits of that
+
+Each of the 24 tasks was implemented by one worker and reviewed by an independent
+agent that read the diff, ran the gates and mutation-tested the guards. Seven per-task
+reviews ran (A1, A2, B1, B2, C1, D1, F2) and **every one returned CHANGES_REQUIRED**,
+overwhelmingly for two recurring classes: incomplete version/scope isolation, and tests
+that passed against a deliberately broken implementation.
+
+Integration then found defects no per-task review could see, because they were
+disagreements *between* branches:
+
+1. Task C2 and D1 called a `search_dense` signature that Task B2's review had just
+   restored to its frozen form.
+2. Tasks C1 and C2 each defined their own structurally-identical `ScoredChunk`; two
+   such Pydantic models are still different runtime types across the fusion boundary.
+   Collapsed to one definition.
+3. `AssistantPanel`, `AnswerView` and `AssistantStates` all existed with passing unit
+   tests, and none were wired together or mounted — the feature was unreachable in the
+   product until a dedicated integration task.
+4. `services/api/app/db.py` never issued `PRAGMA foreign_keys=ON`, so every foreign key
+   in the schema — including the composite key binding a chunk to its parse run, and
+   the pre-existing Phase 2/3 cascades — was unenforced on SQLite.
+5. The background indexing worker raised out of its loop and `exit(1)` on a document
+   with no matching parse run, which would stop processing for every other document.
+6. A worker, told not to add a `family_id` column, instead created a shadow table at
+   runtime via `create_all` — schema outside Alembic. Reverted; the family guard is now
+   a constant check with no persistence.
+
+The final whole-diff integration review returned **PASS** with one warning (an
+untested archive-scope guard), which was then covered by a test.
+
+**Reviewer-strength caveat, stated plainly:** every review that found a blocking defect
+was run by `codex` at `gpt-5.6-luna` with `model_reasoning_effort=max`. That account hit
+its usage limit before the final integration review, so the final review — the single
+most important one — ran on the weaker worker-tier model (`agy`, Gemini 3.7 Flash,
+high) and returned PASS. A PASS from the weaker reviewer is weaker evidence than the
+CHANGES_REQUIRED verdicts that preceded it. Re-running the final review on
+`gpt-5.6-luna max` when that quota resets is recommended before treating this phase as
+independently validated.
+
+#### Known limitations carried forward
+
+- **OCR / ADR-001 is unchanged and still blocking.** PP-StructureV3 is unavailable and
+  real scanned documents still produce no critical fields. Every Phase 4 fixture is
+  born-digital or synthetic. Nothing here makes a real scanned document answerable, and
+  the phase must not be read as production-ready for scanned input.
+- Phases 1, 2 and 3 remain `IN_PROGRESS` for that same reason.
+- Login remains the Phase 3 screen/state handoff; there is no authentication backend,
+  so there is no real tenancy. `family_id` is therefore enforced as a single
+  authoritative constant rather than persisted — multi-family support needs a real
+  tenancy source and is Phase 5+ work.
+- CI job definitions are present but no remote GitHub Actions run was observed.
+- The real self-hosted model and a real RAGAS run are offline operator evidence only;
+  neither has been executed, and neither is required by CI.
