@@ -96,6 +96,11 @@ class BM25Index:
         self._k1 = k1
         self._b = b
         self._chunks_list: list[Chunk] = list(chunks)
+        # A Chunk does not carry family_id.  Bind the family supplied by the
+        # indexing boundary once, rather than copying the query's family onto
+        # every candidate during search.  An unbound collection cannot prove
+        # family isolation and is therefore rejected when searched.
+        self._indexed_scope = scope
 
         if self._chunks_list:
             validate_chunk_tree(self._chunks_list)
@@ -107,30 +112,9 @@ class BM25Index:
             seen_ids.add(chunk.chunk_id)
 
             if scope is not None:
-                if scope.document_id and chunk.document_id != scope.document_id:
-                    raise ValueError(
-                        f"chunk {chunk.chunk_id!r} document_id {chunk.document_id!r} "
-                        f"contradicts scope document_id {scope.document_id!r}"
-                    )
-                if (
-                    scope.document_version is not None
-                    and chunk.document_version is not None
-                    and chunk.document_version != scope.document_version
-                ):
-                    raise ValueError(
-                        f"chunk {chunk.chunk_id!r} document_version {chunk.document_version!r} "
-                        f"contradicts scope document_version {scope.document_version!r}"
-                    )
-                if (
-                    scope.parse_run_id is not None
-                    and chunk.parse_run_id is not None
-                    and chunk.parse_run_id != scope.parse_run_id
-                ):
-                    raise ValueError(
-                        f"chunk {chunk.chunk_id!r} parse_run_id {chunk.parse_run_id!r} "
-                        f"contradicts scope parse_run_id {scope.parse_run_id!r}"
-                    )
                 chunk_scope = EvidenceScope(
+                    # This is provenance recorded at construction time, not
+                    # the caller's later query scope.
                     family_id=scope.family_id,
                     document_id=chunk.document_id,
                     document_version=chunk.document_version,
@@ -138,20 +122,15 @@ class BM25Index:
                     user_id=scope.user_id,
                     thread_id=scope.thread_id,
                 )
-                if not scope_matches(chunk_scope, scope):
-                    raise ValueError(
-                        f"chunk {chunk.chunk_id!r} scope violates requested EvidenceScope"
-                    )
+                _validate_indexed_chunk_scope(chunk, chunk_scope, scope)
 
         # Precompute tokenizations, term frequencies, document lengths
-        self._doc_tokens: dict[str, list[str]] = {}
         self._doc_tf: dict[str, dict[str, int]] = {}
         self._doc_len: dict[str, int] = {}
         self._doc_freq: dict[str, int] = Counter()
 
         for chunk in self._chunks_list:
             tokens = tokenize_vi(chunk.text)
-            self._doc_tokens[chunk.chunk_id] = tokens
             self._doc_len[chunk.chunk_id] = len(tokens)
             tf = Counter(tokens)
             self._doc_tf[chunk.chunk_id] = dict(tf)
@@ -196,11 +175,13 @@ class BM25Index:
         """
         if top_k <= 0:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
-        if not scope.document_id:
-            raise ValueError("scope must specify document_id")
+        _validate_search_scope(scope)
 
         if self._num_docs == 0:
             return []
+
+        if self._indexed_scope is None:
+            raise ValueError("BM25Index must be initialized with an indexed EvidenceScope")
 
         query_tokens = tokenize_vi(query)
         if not query_tokens:
@@ -212,23 +193,14 @@ class BM25Index:
         scoped_chunks: list[Chunk] = []
         for chunk in self._chunks_list:
             chunk_scope = EvidenceScope(
-                family_id=scope.family_id,
+                family_id=self._indexed_scope.family_id,
                 document_id=chunk.document_id,
                 document_version=chunk.document_version,
                 parse_run_id=chunk.parse_run_id,
-                user_id=scope.user_id,
-                thread_id=scope.thread_id,
+                user_id=self._indexed_scope.user_id,
+                thread_id=self._indexed_scope.thread_id,
             )
             if not scope_matches(chunk_scope, scope):
-                continue
-            if scope.document_id and chunk.document_id != scope.document_id:
-                continue
-            if scope.parse_run_id and chunk.parse_run_id != scope.parse_run_id:
-                continue
-            if (
-                scope.document_version is not None
-                and chunk.document_version != scope.document_version
-            ):
                 continue
             scoped_chunks.append(chunk)
 
@@ -324,74 +296,92 @@ class BM25LexicalRetriever:
 
     def search(
         self,
-        query_or_scope: str | EvidenceScope,
-        query_or_none: str | None = None,
-        *,
-        scope: EvidenceScope | None = None,
-        top_k: int = 10,
-    ) -> list[ScoredChunk]:
-        """Search lexical candidates.
-
-        Supports both `search(query, scope=scope, top_k=top_k)` and
-        `search(scope, query, top_k=top_k)` call styles.
-        """
-        resolved_scope: EvidenceScope
-        resolved_query: str
-
-        if isinstance(query_or_scope, EvidenceScope):
-            resolved_scope = query_or_scope
-            if query_or_none is None:
-                raise ValueError(
-                    "query string must be provided when scope is passed as first argument"
-                )
-            resolved_query = query_or_none
-        else:
-            resolved_query = query_or_scope
-            if scope is None:
-                raise ValueError("scope must be provided as a keyword argument")
-            resolved_scope = scope
-
-        if top_k <= 0:
-            raise ValueError(f"top_k must be a positive integer, got {top_k}")
-        if not resolved_scope.document_id:
-            raise ValueError("scope must specify document_id")
-
-        if self._doc_index is not None:
-            # Delegate to DocumentIndex.search_lexical, passing through EvidenceScope
-            results = self._doc_index.search_lexical(
-                scope=resolved_scope,
-                query=resolved_query,
-                top_k=top_k,
-            )
-            return [
-                ScoredChunk(
-                    chunk=r.chunk,
-                    score=r.score,
-                    rank=r.rank,
-                    retriever="lexical",
-                )
-                for r in results
-            ]
-
-        if self._bm25_index is not None:
-            return self._bm25_index.search(
-                query=resolved_query,
-                scope=resolved_scope,
-                top_k=top_k,
-            )
-
-        return []
-
-    def retrieve(
-        self,
         query: str,
         *,
         scope: EvidenceScope,
         top_k: int = 10,
     ) -> list[ScoredChunk]:
-        """Convenience alias for search(query, scope=scope, top_k=top_k)."""
-        return self.search(query, scope=scope, top_k=top_k)
+        """Search lexical candidates.
+
+        The query is always supplied first and the complete evidence scope is
+        supplied by keyword so callers cannot accidentally swap the two.
+        """
+        if scope is None:
+            raise ValueError("scope must be provided as a keyword argument")
+        _validate_search_scope(scope)
+
+        if self._doc_index is not None:
+            # DocumentIndex.search_lexical is the frozen production seam.  Its
+            # current SQL adapter performs deterministic term overlap, not
+            # BM25; this adapter must not claim to recalculate BM25 without a
+            # chunk-enumeration contract.  The index remains responsible for
+            # family/version/parse-run isolation.
+            results = self._doc_index.search_lexical(
+                scope=scope,
+                query=query,
+                top_k=top_k,
+            )
+            for result in results:
+                _validate_returned_chunk_scope(result.chunk, scope)
+            return results
+
+        if self._bm25_index is not None:
+            return self._bm25_index.search(
+                query=query,
+                scope=scope,
+                top_k=top_k,
+            )
+
+        return []
 
 
 # Alias for compatibility
 LexicalRetriever = BM25LexicalRetriever
+
+
+def _validate_search_scope(scope: EvidenceScope) -> None:
+    """Reject retrieval scopes that are broad enough to mix document data."""
+    if not scope.document_id:
+        raise ValueError("scope must specify document_id")
+    if scope.document_version is None and scope.parse_run_id is None:
+        raise ValueError("scope must specify parse_run_id or document_version")
+
+
+def _validate_returned_chunk_scope(chunk: Chunk, scope: EvidenceScope) -> None:
+    """Ensure an index adapter did not return a chunk outside its request."""
+    candidate = EvidenceScope(
+        family_id=scope.family_id,
+        document_id=chunk.document_id,
+        document_version=chunk.document_version,
+        parse_run_id=chunk.parse_run_id,
+    )
+    if not scope_matches(candidate, scope):
+        raise ValueError(f"retrieved chunk {chunk.chunk_id!r} violates requested EvidenceScope")
+
+
+def _validate_indexed_chunk_scope(
+    chunk: Chunk,
+    candidate: EvidenceScope,
+    allowed: EvidenceScope,
+) -> None:
+    """Validate recorded chunk provenance against the index's construction scope."""
+    if candidate.document_id != allowed.document_id and not allowed.archive_scope:
+        raise ValueError(
+            f"chunk {chunk.chunk_id!r} document_id {chunk.document_id!r} "
+            f"contradicts scope document_id {allowed.document_id!r}"
+        )
+    if (
+        allowed.document_version is not None
+        and candidate.document_version != allowed.document_version
+    ):
+        raise ValueError(
+            f"chunk {chunk.chunk_id!r} document_version {chunk.document_version!r} "
+            f"contradicts scope document_version {allowed.document_version!r}"
+        )
+    if allowed.parse_run_id is not None and candidate.parse_run_id != allowed.parse_run_id:
+        raise ValueError(
+            f"chunk {chunk.chunk_id!r} parse_run_id {chunk.parse_run_id!r} "
+            f"contradicts scope parse_run_id {allowed.parse_run_id!r}"
+        )
+    if not scope_matches(candidate, allowed):
+        raise ValueError(f"chunk {chunk.chunk_id!r} scope violates requested EvidenceScope")

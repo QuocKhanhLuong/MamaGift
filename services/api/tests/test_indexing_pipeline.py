@@ -414,9 +414,8 @@ def test_embedding_version_change_forces_reindex(
         parse_run_id=parse_run.id,
     )
     query_embed = asyncio.run(provider_v2.embed_query("thông tin"))
-    results = index.search_dense(
-        scope, query_embed.vectors[0], top_k=5, embedding_version="fake-bge-m3-v2"
-    )
+    index_v2 = SqlDocumentIndex(session, embedding_version=provider_v2.embedding_version)
+    results = index_v2.search_dense(scope, query_embed.vectors[0], top_k=5)
     assert len(results) == 0  # v1 chunks are excluded
 
     # Re-index with provider v2
@@ -427,9 +426,7 @@ def test_embedding_version_change_forces_reindex(
     assert not needs_reindex(stats_v2, provider_v2)
 
     # Search with v2 now succeeds
-    results_v2 = index.search_dense(
-        scope, query_embed.vectors[0], top_k=5, embedding_version="fake-bge-m3-v2"
-    )
+    results_v2 = index_v2.search_dense(scope, query_embed.vectors[0], top_k=5)
     assert len(results_v2) > 0
 
 

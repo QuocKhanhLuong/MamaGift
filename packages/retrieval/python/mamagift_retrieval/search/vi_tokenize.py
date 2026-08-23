@@ -78,8 +78,11 @@ def tokenize_vi(text: str) -> list[str]:
     norm_text = normalize_vi_text(text).lower()
     tokens: list[str] = []
 
-    # 1. Extract and preserve document numbers
-    for match in _DOC_NUMBER_RE.finditer(norm_text):
+    # 1. Extract and preserve document numbers.  Keep their spans so the
+    # general word pass below cannot shatter an exact identifier into
+    # independently searchable fragments.
+    doc_number_matches = list(_DOC_NUMBER_RE.finditer(norm_text))
+    for match in doc_number_matches:
         doc_num = match.group().strip("./-")
         if doc_num:
             tokens.append(doc_num)
@@ -112,6 +115,11 @@ def tokenize_vi(text: str) -> list[str]:
 
     # 6. Extract individual word/syllable tokens
     for word_match in _WORD_RE.finditer(norm_text):
+        if any(
+            word_match.start() < doc_match.end() and doc_match.start() < word_match.end()
+            for doc_match in doc_number_matches
+        ):
+            continue
         w = word_match.group()
         if w:
             tokens.append(w)
