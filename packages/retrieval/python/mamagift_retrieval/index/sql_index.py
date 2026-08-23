@@ -8,15 +8,9 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import (
-    Column,
     CursorResult,
     Engine,
-    Integer,
-    MetaData,
-    String,
-    Table,
     delete,
-    func,
     select,
 )
 from sqlalchemy.orm import Session, sessionmaker
@@ -39,30 +33,6 @@ def _validate_authoritative_family(scope: EvidenceScope) -> None:
             f"scope family_id {scope.family_id!r} is not authoritative; "
             f"expected {AUTHORITATIVE_FAMILY_ID!r}"
         )
-
-
-_scope_metadata = MetaData()
-_document_scopes_table = Table(
-    "document_index_scopes",
-    _scope_metadata,
-    Column("document_id", String(64), primary_key=True),
-    Column("parse_run_id", String(64), primary_key=True),
-    Column("document_version", Integer, nullable=False),
-    Column("family_id", String(128), nullable=False),
-)
-
-
-def _ensure_scope_table(session: Session) -> None:
-    bind = session.get_bind()
-    _scope_metadata.create_all(bind, checkfirst=True)
-
-
-def _get_family_map(session: Session, document_id: str) -> dict[str, str]:
-    _ensure_scope_table(session)
-    stmt = select(_document_scopes_table.c.parse_run_id, _document_scopes_table.c.family_id).where(
-        _document_scopes_table.c.document_id == document_id,
-    )
-    return dict(session.execute(stmt).all())  # type: ignore[arg-type]
 
 
 def _tokenize(text: str) -> set[str]:
@@ -234,7 +204,6 @@ class SqlDocumentIndex:
                 raise ValueError(f"entries contain mixed embedding_models: {sorted(emb_models)}")
 
         with self._get_session() as session:
-            _ensure_scope_table(session)
             trans_cm = session.begin_nested() if session.in_transaction() else session.begin()
             with trans_cm:
                 del_stmt = delete(DocumentChunk).where(
@@ -243,20 +212,6 @@ class SqlDocumentIndex:
                     DocumentChunk.document_version == scope.document_version,
                 )
                 session.execute(del_stmt)
-
-                del_scope = delete(_document_scopes_table).where(
-                    _document_scopes_table.c.document_id == scope.document_id,
-                    _document_scopes_table.c.parse_run_id == scope.parse_run_id,
-                )
-                session.execute(del_scope)
-
-                ins_scope = _document_scopes_table.insert().values(
-                    document_id=scope.document_id,
-                    parse_run_id=scope.parse_run_id,
-                    document_version=scope.document_version,
-                    family_id=AUTHORITATIVE_FAMILY_ID,
-                )
-                session.execute(ins_scope)
 
                 for entry in entries:
                     tok_count = (
@@ -314,20 +269,17 @@ class SqlDocumentIndex:
         Candidates are sorted in descending order of score, with chunk_id ascending as a
         stable tie-break for equal scores: `(-score, chunk.chunk_id)`.
         """
+        _validate_authoritative_family(scope)
         if top_k <= 0:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
         if not query_vector:
             raise ValueError("query_vector cannot be empty")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
-            _ensure_scope_table(session)
-            family_map = _get_family_map(session, scope.document_id)
-
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -335,20 +287,17 @@ class SqlDocumentIndex:
                 stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
             rows = list(session.scalars(stmt).all())
 
-            family_rows = [r for r in rows if family_map.get(r.parse_run_id) == scope.family_id]
-
             target_embedding_version = self._embedding_version
             if target_embedding_version is None:
-                for r in family_rows:
+                for r in rows:
                     if r.embedding is not None and r.embedding_version is not None:
                         target_embedding_version = r.embedding_version
                         break
 
             candidates: list[tuple[float, Chunk]] = []
-            for row in family_rows:
-                row_family = family_map.get(row.parse_run_id)
+            for row in rows:
                 row_scope = EvidenceScope(
-                    family_id=row_family or "",
+                    family_id=AUTHORITATIVE_FAMILY_ID,
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,
@@ -394,11 +343,11 @@ class SqlDocumentIndex:
         Candidates are sorted in descending order of score, with chunk_id ascending as a
         stable tie-break for equal scores: `(-score, chunk.chunk_id)`.
         """
+        _validate_authoritative_family(scope)
         if top_k <= 0:
             raise ValueError(f"top_k must be a positive integer, got {top_k}")
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
@@ -409,9 +358,6 @@ class SqlDocumentIndex:
             return []
 
         with self._get_session() as session:
-            _ensure_scope_table(session)
-            family_map = _get_family_map(session, scope.document_id)
-
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -421,11 +367,8 @@ class SqlDocumentIndex:
 
             candidates: list[tuple[float, Chunk]] = []
             for row in rows:
-                row_family = family_map.get(row.parse_run_id)
-                if row_family is None or row_family != scope.family_id:
-                    continue
                 row_scope = EvidenceScope(
-                    family_id=row_family,
+                    family_id=AUTHORITATIVE_FAMILY_ID,
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,
@@ -463,62 +406,35 @@ class SqlDocumentIndex:
 
         Returns the number of deleted rows.
         """
+        _validate_authoritative_family(scope)
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
-            _ensure_scope_table(session)
-            family_map = _get_family_map(session, scope.document_id)
-
-            matching_runs = [
-                run_id
-                for run_id, fam_id in family_map.items()
-                if fam_id == scope.family_id
-                and (scope.parse_run_id is None or run_id == scope.parse_run_id)
-            ]
-            if not matching_runs:
-                return 0
-
             trans_cm = session.begin_nested() if session.in_transaction() else session.begin()
             with trans_cm:
                 stmt = delete(DocumentChunk).where(
                     DocumentChunk.document_id == scope.document_id,
-                    DocumentChunk.parse_run_id.in_(matching_runs),
                 )
+                if scope.parse_run_id is not None:
+                    stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
                 if scope.document_version is not None:
                     stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
                 result = session.execute(stmt)
                 deleted_count = int(result.rowcount) if isinstance(result, CursorResult) else 0
-
-                for run_id in matching_runs:
-                    remaining = session.scalar(
-                        select(func.count(DocumentChunk.id)).where(
-                            DocumentChunk.document_id == scope.document_id,
-                            DocumentChunk.parse_run_id == run_id,
-                        )
-                    )
-                    if remaining == 0:
-                        del_scope = delete(_document_scopes_table).where(
-                            _document_scopes_table.c.document_id == scope.document_id,
-                            _document_scopes_table.c.parse_run_id == run_id,
-                        )
-                        session.execute(del_scope)
-
                 return deleted_count
 
     def stats(self, scope: EvidenceScope) -> IndexStats:
         """Return indexing statistics for the scoped document version / parse run."""
+        _validate_authoritative_family(scope)
         if not scope.document_id:
             raise ValueError("scope must specify document_id")
-        _validate_authoritative_family(scope)
         if scope.document_version is None and scope.parse_run_id is None:
             raise ValueError("scope must specify parse_run_id or document_version")
 
         with self._get_session() as session:
-            _ensure_scope_table(session)
             stmt = select(DocumentChunk).where(DocumentChunk.document_id == scope.document_id)
             if scope.parse_run_id is not None:
                 stmt = stmt.where(DocumentChunk.parse_run_id == scope.parse_run_id)
@@ -526,14 +442,10 @@ class SqlDocumentIndex:
                 stmt = stmt.where(DocumentChunk.document_version == scope.document_version)
             rows = list(session.scalars(stmt).all())
 
-            family_map = _get_family_map(session, scope.document_id)
             matching_rows: list[DocumentChunk] = []
             for row in rows:
-                row_family = family_map.get(row.parse_run_id)
-                if row_family is None or row_family != scope.family_id:
-                    continue
                 row_scope = EvidenceScope(
-                    family_id=row_family,
+                    family_id=AUTHORITATIVE_FAMILY_ID,
                     document_id=row.document_id,
                     document_version=row.document_version,
                     parse_run_id=row.parse_run_id,

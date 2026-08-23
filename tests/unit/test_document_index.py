@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, update
+from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import Base
@@ -138,6 +139,31 @@ def test_replace_and_stats(session_factory, index: SqlDocumentIndex) -> None:
 
     queried_stats = index.stats(scope)
     assert queried_stats == stats_result
+
+
+def test_index_operations_do_not_create_runtime_schema_tables(
+    db_engine, session_factory, index: SqlDocumentIndex
+) -> None:
+    """Indexing must use only tables declared by the Alembic-backed ORM schema."""
+    doc_id = "doc_no_runtime_schema"
+    _seed_document(session_factory, doc_id)
+    scope = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id=doc_id,
+        document_version=1,
+        parse_run_id="run_no_runtime_schema",
+    )
+    entry = IndexEntry(
+        chunk=_make_chunk(doc_id, doc_id, "run_no_runtime_schema", text="schema check"),
+        chunk_index=0,
+    )
+
+    tables_before = set(sqlalchemy_inspect(db_engine).get_table_names())
+    index.replace(scope, [entry])
+    tables_after = set(sqlalchemy_inspect(db_engine).get_table_names())
+
+    assert tables_after == tables_before
+    assert "document_index_scopes" not in tables_after
 
 
 def test_family_isolation_across_all_methods(session_factory, index: SqlDocumentIndex) -> None:
