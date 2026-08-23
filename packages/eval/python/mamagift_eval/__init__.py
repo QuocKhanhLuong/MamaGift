@@ -13,6 +13,14 @@ from .metrics import (
     task_owner_association_accuracy,
     task_recall,
 )
+from .qa_metrics import (
+    abstention_correctness,
+    citation_completeness,
+    citation_correctness,
+    deadline_correctness,
+    responsible_party_correctness,
+    task_action_completeness,
+)
 from .retrieval_harness import (
     RetrievalAggregateMetrics,
     RetrievalCaseResult,
@@ -48,4 +56,10 @@ __all__ = [
     "task_recall",
     "evaluate_retrieval",
     "load_retrieval_cases",
+    "abstention_correctness",
+    "citation_completeness",
+    "citation_correctness",
+    "deadline_correctness",
+    "responsible_party_correctness",
+    "task_action_completeness",
 ]
