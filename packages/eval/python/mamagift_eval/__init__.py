@@ -4,74 +4,22 @@ LLM evaluator or RAGAS integration is implemented here.
 """
 
 from .document_types import DOCUMENT_TYPE_SLICES, slice_by_document_type
-from .metrics import (
-    deadline_accuracy,
-    nested_hierarchy_f1,
-    table_appendix_preservation,
-    task_deadline_association_accuracy,
-    task_order_accuracy,
-    task_owner_association_accuracy,
-    task_recall,
-)
-from .qa_metrics import (
-    abstention_correctness,
-    citation_completeness,
-    citation_correctness,
-    deadline_correctness,
-    responsible_party_correctness,
-    task_action_completeness,
-)
-from .ragas_adapter import (
-    RAGAS_METRICS,
-    RagasAdapter,
-    RagasAvailableResult,
-    RagasBackend,
-    RagasEvaluationResult,
-    RagasMetricName,
-    RagasMetricResult,
-    RagasUnavailableResult,
-)
-from .retrieval_harness import (
-    RetrievalAggregateMetrics,
-    RetrievalCaseResult,
-    RetrievalEvaluationHarness,
-    RetrievalEvaluationReport,
-    RetrievalSearch,
-    evaluate_retrieval,
-    load_retrieval_cases,
-)
+from .failure_analysis import 
+from .metrics import 
+from .qa_metrics import 
+from .ragas_adapter import 
+from .retrieval_harness import 
 from .schemas import ExpectedTaskRelation, ParserSemanticCase, RetrievalQACase
 from .taxonomy import FailureDiagnosis, FailureLabel, classify_failure
 
 __all__ = [
     "DOCUMENT_TYPE_SLICES",
     "ExpectedTaskRelation",
+    "FailureAnalysisCase",
+    "FailureAnalysisReport",
     "FailureDiagnosis",
     "FailureLabel",
     "ParserSemanticCase",
-    "RetrievalQACase",
-    "RetrievalAggregateMetrics",
-    "RetrievalCaseResult",
-    "RetrievalEvaluationHarness",
-    "RetrievalEvaluationReport",
-    "RetrievalSearch",
-    "classify_failure",
-    "deadline_accuracy",
-    "nested_hierarchy_f1",
-    "slice_by_document_type",
-    "table_appendix_preservation",
-    "task_deadline_association_accuracy",
-    "task_order_accuracy",
-    "task_owner_association_accuracy",
-    "task_recall",
-    "evaluate_retrieval",
-    "load_retrieval_cases",
-    "abstention_correctness",
-    "citation_completeness",
-    "citation_correctness",
-    "deadline_correctness",
-    "responsible_party_correctness",
-    "task_action_completeness",
     "RAGAS_METRICS",
     "RagasAdapter",
     "RagasAvailableResult",
@@ -80,4 +28,30 @@ __all__ = [
     "RagasMetricName",
     "RagasMetricResult",
     "RagasUnavailableResult",
+    "RetrievalAggregateMetrics",
+    "RetrievalCaseResult",
+    "RetrievalEvaluationHarness",
+    "RetrievalEvaluationReport",
+    "RetrievalQACase",
+    "RetrievalSearch",
+    "abstention_correctness",
+    "analyze_failure",
+    "analyze_failure_case",
+    "analyze_failures",
+    "citation_completeness",
+    "citation_correctness",
+    "classify_failure",
+    "deadline_accuracy",
+    "deadline_correctness",
+    "evaluate_retrieval",
+    "load_retrieval_cases",
+    "nested_hierarchy_f1",
+    "responsible_party_correctness",
+    "slice_by_document_type",
+    "table_appendix_preservation",
+    "task_action_completeness",
+    "task_deadline_association_accuracy",
+    "task_order_accuracy",
+    "task_owner_association_accuracy",
+    "task_recall",
 ]
