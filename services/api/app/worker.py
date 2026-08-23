@@ -17,7 +17,10 @@ import time
 
 from sqlalchemy.orm import Session
 
-from . import ingestion
+from mamagift_retrieval.index import DocumentIndex
+from mamagift_retrieval.providers import EmbeddingProvider
+
+from . import indexing, ingestion
 from .db import get_session_factory
 from .dependencies import get_storage
 from .models import ParseRun
@@ -34,12 +37,25 @@ def process_next_job(
     storage: ObjectStorage,
     settings: Settings,
     worker_id: str,
+    *,
+    auto_index: bool = False,
+    embedding_provider: EmbeddingProvider | None = None,
+    document_index: DocumentIndex | None = None,
 ) -> ParseRun | None:
     """Lease and run at most one job. Returns None when there is nothing to do."""
     job = ingestion.lease_next_job(session, worker_id, settings)
     if job is None:
         return None
-    return ingestion.run_job(session, job, storage, settings)
+    run = ingestion.run_job(session, job, storage, settings)
+    if run is not None and (auto_index or embedding_provider is not None):
+        indexing.index_parse_run_sync(
+            session,
+            run,
+            embedding_provider=embedding_provider,
+            document_index=document_index,
+            settings=settings,
+        )
+    return run
 
 
 def drain(
@@ -48,6 +64,10 @@ def drain(
     settings: Settings,
     worker_id: str,
     max_jobs: int = 100,
+    *,
+    auto_index: bool = False,
+    embedding_provider: EmbeddingProvider | None = None,
+    document_index: DocumentIndex | None = None,
 ) -> int:
     """Run queued jobs until the queue is empty or `max_jobs` is reached."""
     processed = 0
@@ -55,7 +75,15 @@ def drain(
         job = ingestion.lease_next_job(session, worker_id, settings)
         if job is None:
             break
-        ingestion.run_job(session, job, storage, settings)
+        run = ingestion.run_job(session, job, storage, settings)
+        if run is not None and (auto_index or embedding_provider is not None):
+            indexing.index_parse_run_sync(
+                session,
+                run,
+                embedding_provider=embedding_provider,
+                document_index=document_index,
+                settings=settings,
+            )
         processed += 1
     return processed
 
@@ -64,6 +92,7 @@ def main() -> int:  # pragma: no cover - process entry point
     parser = argparse.ArgumentParser(description="MamaGift parse worker")
     parser.add_argument("--once", action="store_true", help="drain the queue and exit")
     parser.add_argument("--interval", type=float, default=2.0, help="poll interval in seconds")
+    parser.add_argument("--index", action="store_true", help="run indexing pipeline after parsing")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -73,7 +102,13 @@ def main() -> int:  # pragma: no cover - process entry point
 
     while True:
         with session_factory() as session:
-            processed = drain(session, storage, settings, worker_id)
+            processed = drain(
+                session,
+                storage,
+                settings,
+                worker_id,
+                auto_index=args.index,
+            )
         if args.once:
             print(f"processed {processed} job(s)")
             return 0
