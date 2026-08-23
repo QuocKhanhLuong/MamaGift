@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import Literal
 
 from mamagift_contracts.errors import WorkerError, WorkerErrorCode
 from mamagift_contracts.llm import (
@@ -48,7 +49,10 @@ class FakeChatProvider:
 
     def set_canned(self, pattern: str, response: CompletionResult | str | Exception) -> None:
         """Map a prompt substring/pattern to a canned response."""
-        self.canned_patterns[pattern] = response
+        clean_pattern = pattern.strip() if pattern else ""
+        if not clean_pattern:
+            raise ValueError("pattern must be a non-empty string")
+        self.canned_patterns[clean_pattern] = response
 
     def reset(self) -> None:
         """Clear call history and queued responses."""
@@ -57,16 +61,18 @@ class FakeChatProvider:
         self.canned_patterns.clear()
         self.handler = None
 
-    def _make_result(self, text: str, finish_reason: str = "stop") -> CompletionResult:
+    def _make_result(
+        self,
+        text: str,
+        finish_reason: Literal["stop", "length", "content_filter", "error"] = "stop",
+    ) -> CompletionResult:
         prompt_words = 10
         completion_words = len(text.split()) if text else 1
         return CompletionResult(
             text=text,
             model=self.model,
             provider=self.provider_name,
-            finish_reason=finish_reason
-            if finish_reason in ("stop", "length", "content_filter", "error")
-            else "stop",  # type: ignore[arg-type]
+            finish_reason=finish_reason,
             usage=TokenUsage(
                 prompt_tokens=prompt_words,
                 completion_tokens=completion_words,
