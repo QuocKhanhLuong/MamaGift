@@ -4,6 +4,13 @@ LLM evaluator or RAGAS integration is implemented here.
 """
 
 from .document_types import DOCUMENT_TYPE_SLICES, slice_by_document_type
+from .failure_analysis import (
+    FailureAnalysisCase,
+    FailureAnalysisReport,
+    analyze_failure,
+    analyze_failure_case,
+    analyze_failures,
+)
 from .metrics import (
     deadline_accuracy,
     nested_hierarchy_f1,
@@ -62,4 +69,9 @@ __all__ = [
     "deadline_correctness",
     "responsible_party_correctness",
     "task_action_completeness",
+    "FailureAnalysisCase",
+    "FailureAnalysisReport",
+    "analyze_failure",
+    "analyze_failure_case",
+    "analyze_failures",
 ]
