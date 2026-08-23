@@ -128,7 +128,11 @@ else:
 `);
 }
 
-async function setDocumentStatusInDb(documentId: string, status: string, errorCode: string = "parse_failed"): Promise<void> {
+async function setDocumentStatusInDb(
+  documentId: string,
+  status: string,
+  errorCode: string = "parse_failed",
+): Promise<void> {
   await runPython(`
 from app.db import get_session_factory
 from app.models import Document

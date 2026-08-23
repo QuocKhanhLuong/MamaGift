@@ -165,9 +165,7 @@ test.describe("Phase 4 Grounded Assistant QA browser journey", () => {
     // Open Assistant panel
     await page.getByRole("tab", { name: "Trợ lý" }).click();
     await expect(page.getByRole("heading", { name: "Trợ lý" })).toBeVisible();
-    await expect(
-      page.getByText("Hôm nay mẹ cần tìm gì trong văn bản này?"),
-    ).toBeVisible();
+    await expect(page.getByText("Hôm nay mẹ cần tìm gì trong văn bản này?")).toBeVisible();
 
     // First ensure SourceViewer is moved to Page 2 to prove citation jump genuinely changes page
     await page.getByRole("button", { name: "Trang sau" }).click();
