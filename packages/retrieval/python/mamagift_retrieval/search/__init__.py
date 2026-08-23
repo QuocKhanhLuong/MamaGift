@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .dense import DenseRetriever, EmbeddingVersionMismatchError
+from .fusion import RRF_K, reciprocal_rank_fusion
 from .lexical import (
     DEFAULT_BM25_B,
     DEFAULT_BM25_K1,
@@ -23,7 +24,9 @@ __all__ = [
     "DenseRetriever",
     "EmbeddingVersionMismatchError",
     "LexicalRetriever",
+    "RRF_K",
     "ScoredChunk",
     "normalize_vi_text",
+    "reciprocal_rank_fusion",
     "tokenize_vi",
 ]
