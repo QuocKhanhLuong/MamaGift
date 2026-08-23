@@ -13,6 +13,15 @@ from .metrics import (
     task_owner_association_accuracy,
     task_recall,
 )
+from .retrieval_harness import (
+    RetrievalAggregateMetrics,
+    RetrievalCaseResult,
+    RetrievalEvaluationHarness,
+    RetrievalEvaluationReport,
+    RetrievalSearch,
+    evaluate_retrieval,
+    load_retrieval_cases,
+)
 from .schemas import ExpectedTaskRelation, ParserSemanticCase, RetrievalQACase
 from .taxonomy import FailureDiagnosis, FailureLabel, classify_failure
 
@@ -23,6 +32,11 @@ __all__ = [
     "FailureLabel",
     "ParserSemanticCase",
     "RetrievalQACase",
+    "RetrievalAggregateMetrics",
+    "RetrievalCaseResult",
+    "RetrievalEvaluationHarness",
+    "RetrievalEvaluationReport",
+    "RetrievalSearch",
     "classify_failure",
     "deadline_accuracy",
     "nested_hierarchy_f1",
@@ -32,4 +46,6 @@ __all__ = [
     "task_order_accuracy",
     "task_owner_association_accuracy",
     "task_recall",
+    "evaluate_retrieval",
+    "load_retrieval_cases",
 ]

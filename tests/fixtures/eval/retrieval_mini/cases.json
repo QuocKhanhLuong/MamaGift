@@ -1,0 +1,44 @@
+[
+  {
+    "case_id": "mini-current-chunk",
+    "question": "Which synthetic block states the sample document number?",
+    "expected_document_ids": ["mini-doc-001"],
+    "expected_block_ids": ["mini-block-number"],
+    "expected_chunk_ids": ["mini-chunk-number"],
+    "required_metadata_scope": {
+      "family_id": "mamagift",
+      "document_id": "mini-doc-001",
+      "document_version": "1",
+      "parse_run_id": "mini-parse-001",
+      "document_number": "01/SYNTHETIC"
+    }
+  },
+  {
+    "case_id": "mini-missing-answer-chunk",
+    "question": "Which synthetic block contains the absent answer?",
+    "expected_document_ids": ["mini-doc-001"],
+    "expected_block_ids": ["mini-block-absent"],
+    "expected_chunk_ids": ["mini-chunk-absent"],
+    "required_metadata_scope": {
+      "family_id": "mamagift",
+      "document_id": "mini-doc-001",
+      "document_version": "1",
+      "parse_run_id": "mini-parse-001",
+      "document_number": "01/SYNTHETIC"
+    }
+  },
+  {
+    "case_id": "mini-stale-parse-isolation",
+    "question": "Which synthetic block is valid for the current parse?",
+    "expected_document_ids": ["mini-doc-001"],
+    "expected_block_ids": ["mini-block-current"],
+    "expected_chunk_ids": ["mini-chunk-current"],
+    "required_metadata_scope": {
+      "family_id": "mamagift",
+      "document_id": "mini-doc-001",
+      "document_version": "1",
+      "parse_run_id": "mini-parse-001",
+      "document_number": "01/SYNTHETIC"
+    }
+  }
+]
