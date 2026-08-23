@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .settings import get_settings
@@ -13,6 +14,21 @@ from .settings import get_settings
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
+
+
+@event.listens_for(Engine, "connect")
+def _enable_sqlite_foreign_keys(
+    dbapi_connection: object,
+    _connection_record: object,
+) -> None:
+    """Enable FK enforcement for every SQLite connection, including test engines."""
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 @lru_cache(maxsize=1)
