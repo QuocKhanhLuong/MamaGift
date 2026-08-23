@@ -118,7 +118,37 @@ class FakeChatProvider:
             (m.content for m in reversed(request.messages) if m.role == "user"), ""
         )
         if request.response_format == "json_object":
-            content = json.dumps({"answer": f"Fake answer for: {last_user_msg}"})
+            import re
+
+            cit_matches = re.findall(
+                r"\[citation_id=([^\]]+)\]\s*(.*?)(?=\[citation_id=|</UNTRUSTED_DOCUMENT_DATA>|\Z)",
+                last_user_msg,
+                re.DOTALL,
+            )
+            citation_ids = [m[0].strip() for m in cit_matches if m[0].strip()]
+            if citation_ids:
+                first_cit = citation_ids[0]
+                raw_snippet = cit_matches[0][1].strip() if cit_matches else ""
+                snippet_line = (
+                    raw_snippet.splitlines()[0].strip() if raw_snippet else "Nội dung trích dẫn"
+                )
+                content = json.dumps(
+                    {
+                        "answer": f"{snippet_line} [{first_cit}]",
+                        "status": "answered",
+                        "citations": [{"citation_id": first_cit}],
+                    },
+                    ensure_ascii=False,
+                )
+            else:
+                content = json.dumps(
+                    {
+                        "answer": f"Fake answer for: {last_user_msg}",
+                        "status": "insufficient_evidence",
+                        "citations": [],
+                    },
+                    ensure_ascii=False,
+                )
         else:
             content = f"Fake answer for: {last_user_msg}"
 

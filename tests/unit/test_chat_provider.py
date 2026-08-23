@@ -1163,6 +1163,49 @@ class TestFakeChatProvider:
         assert len(fake.responses) == 0
         assert len(fake.canned_patterns) == 0
 
+    def test_grounded_default_json_response_derives_citations(self) -> None:
+        fake = FakeChatProvider()
+        prompt_with_evidence = (
+            "CÂU HỎI CỦA NGƯỜI DÙNG:\nSố văn bản là gì?\n\n"
+            "BẰNG CHỨNG ĐƯỢC PHÉP SỬ DỤNG:\n"
+            "<UNTRUSTED_DOCUMENT_DATA>\n[citation_id=c1]\n"
+            "Số: 57/QĐ-UBND\n</UNTRUSTED_DOCUMENT_DATA>\n"
+            "<UNTRUSTED_DOCUMENT_DATA>\n[citation_id=c2]\n"
+            "ỦY BAN NHÂN DÂN XÃ MAI GIANG\n</UNTRUSTED_DOCUMENT_DATA>"
+        )
+        req = _create_sample_request(
+            messages=[
+                ChatMessage(role="system", content="system policy"),
+                ChatMessage(role="user", content=prompt_with_evidence),
+            ],
+            response_format="json_object",
+        )
+        res = asyncio.run(fake.complete(req))
+        parsed = json.loads(res.text)
+
+        assert parsed["status"] == "answered"
+        assert "citations" in parsed
+        emitted_ids = {c["citation_id"] for c in parsed["citations"]}
+        assert emitted_ids <= {"c1", "c2"}
+        assert "c1" in emitted_ids
+        assert "[c1]" in parsed["answer"]
+
+    def test_grounded_default_json_response_abstains_without_evidence(self) -> None:
+        fake = FakeChatProvider()
+        prompt_no_evidence = "CÂU HỎI CỦA NGƯỜI DÙNG:\nThông tin không có trong tài liệu?\n"
+        req = _create_sample_request(
+            messages=[
+                ChatMessage(role="system", content="system policy"),
+                ChatMessage(role="user", content=prompt_no_evidence),
+            ],
+            response_format="json_object",
+        )
+        res = asyncio.run(fake.complete(req))
+        parsed = json.loads(res.text)
+
+        assert parsed["status"] == "insufficient_evidence"
+        assert parsed["citations"] == []
+
 
 @pytest.mark.unit
 class TestSettingsLLMConfiguration:

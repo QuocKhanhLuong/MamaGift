@@ -19,12 +19,22 @@ INSUFFICIENT_EVIDENCE_MESSAGE = (
 FAILED_VALIDATION_MESSAGE = "Không thể xác thực câu trả lời từ mô hình; vui lòng thử lại."
 
 
+class _RawCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    citation_id: str
+    document_id: str | None = None
+    page_number: int | None = None
+    block_ids: list[str] | None = None
+    quote: str | None = None
+
+
 class _RawAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: str
     status: Literal["answered", "insufficient_evidence", "ai_worker_unavailable", "failed"]
-    citations: list[Citation]
+    citations: list[_RawCitation]
 
 
 def _refs(evidence: EvidenceSet, model: ModelRef) -> tuple[RetrievalRef, ModelRef]:
@@ -112,10 +122,33 @@ def parse_and_validate_answer(
         raw = _RawAnswer.model_validate(payload)
         by_id = {item.citation_id: item for item in evidence.evidence}
         validated_citations: list[Citation] = []
-        for citation in raw.citations:
-            item = by_id.get(citation.citation_id)
+        for raw_citation in raw.citations:
+            item = by_id.get(raw_citation.citation_id)
             if item is None:
-                raise ValueError(f"unknown citation_id {citation.citation_id!r}")
+                raise ValueError(f"unknown citation_id {raw_citation.citation_id!r}")
+            doc_id = (
+                raw_citation.document_id
+                if raw_citation.document_id is not None
+                else item.document_id
+            )
+            page_num = (
+                raw_citation.page_number
+                if raw_citation.page_number is not None
+                else (item.page_numbers[0] if item.page_numbers else 1)
+            )
+            block_ids = (
+                raw_citation.block_ids
+                if raw_citation.block_ids is not None
+                else list(item.source_block_ids)
+            )
+            quote = raw_citation.quote if raw_citation.quote is not None else item.text
+            citation = Citation(
+                citation_id=raw_citation.citation_id,
+                document_id=doc_id,
+                page_number=page_num,
+                block_ids=block_ids,
+                quote=quote,
+            )
             _validate_citation(citation, item, evidence)
             validated_citations.append(citation)
     except (ValueError, TypeError, json.JSONDecodeError, ValidationError):

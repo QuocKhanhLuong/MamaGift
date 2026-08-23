@@ -13,9 +13,15 @@ const WEB_PORT = 5183;
 const API_BASE_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_BASE_URL = `http://127.0.0.1:${WEB_PORT}`;
 
-const PYTHONPATH = ["services/api", "packages/contracts/python", "packages/docpipe/python"].join(
-  path.delimiter,
-);
+const PYTHONPATH = [
+  "services/api",
+  "services/ai-worker",
+  "packages/contracts/python",
+  "packages/docpipe/python",
+  "packages/retrieval/python",
+  "packages/eval/python",
+  "packages/rag/python",
+].join(path.delimiter);
 
 const apiEnv = {
   PYTHONPATH,
