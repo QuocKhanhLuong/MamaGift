@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +10,19 @@ const FIXTURE_PDF = path.resolve(
   __dirname,
   "../../../benchmarks/parser/fixtures/quyet_dinh_dieu_khoan.pdf",
 );
+const SYNTHETIC_FIXTURES_DIR = path.join(REPO_ROOT, "var", "test_fixtures");
+
+function prepareUniquePdf(basePath: string, tag: string): string {
+  fs.mkdirSync(SYNTHETIC_FIXTURES_DIR, { recursive: true });
+  const targetPath = path.join(
+    SYNTHETIC_FIXTURES_DIR,
+    `${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.pdf`,
+  );
+  const content = fs.readFileSync(basePath);
+  const trailerComment = Buffer.from(`\n% unique_test_fixture_${tag}_${Date.now()}\n`);
+  fs.writeFileSync(targetPath, Buffer.concat([content, trailerComment]));
+  return targetPath;
+}
 
 function indexDocument(documentId: string): void {
   execFileSync(
@@ -71,55 +85,10 @@ with session_factory() as session:
   );
 }
 
-function cleanDatabase(): void {
-  execFileSync(
-    "uv",
-    [
-      "run",
-      "python",
-      "-c",
-      `
-import sys
-from pathlib import Path
-repo = Path("${REPO_ROOT}")
-for p in reversed([
-    repo / "services/api",
-    repo / "packages/contracts/python",
-    repo / "packages/docpipe/python",
-    repo / "packages/retrieval/python",
-    repo / "packages/eval/python",
-    repo / "packages/rag/python",
-]):
-    sys.path.insert(0, str(p))
-
-from app.db import get_session_factory
-from app.models import Document, Job, ParseRun, DocumentChunk, FeedbackEvent
-from sqlalchemy import delete
-
-session_factory = get_session_factory()
-with session_factory() as session:
-    session.execute(delete(DocumentChunk))
-    session.execute(delete(FeedbackEvent))
-    session.execute(delete(Job))
-    session.execute(delete(ParseRun))
-    session.execute(delete(Document))
-    session.commit()
-`,
-    ],
-    {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        DATABASE_URL: `sqlite:///${path.join(REPO_ROOT, "var", "e2e", "e2e.db")}`,
-        STORAGE_ROOT: path.join(REPO_ROOT, "var", "e2e", "storage"),
-        APP_ENV: "test",
-        UV_CACHE_DIR: path.join(REPO_ROOT, ".uv-cache"),
-      },
-    },
-  );
-}
-
 async function loginAndUploadReadyDocument(page: Page): Promise<string> {
+  const fixturePath = prepareUniquePdf(FIXTURE_PDF, "assistant_qa");
+  const fileName = path.basename(fixturePath);
+
   await page.goto("/");
   await expect(page).toHaveURL(/\/dang-nhap$/);
 
@@ -129,8 +98,8 @@ async function loginAndUploadReadyDocument(page: Page): Promise<string> {
   await expect(page.getByRole("heading", { name: "Văn bản" })).toBeVisible();
 
   await page.getByRole("button", { name: "Tải văn bản PDF" }).click();
-  await page.setInputFiles("#upload-file-input", FIXTURE_PDF);
-  await expect(page.getByText("quyet_dinh_dieu_khoan.pdf", { exact: true })).toBeVisible();
+  await page.setInputFiles("#upload-file-input", fixturePath);
+  await expect(page.getByText(fileName, { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Tải lên" })).toBeEnabled();
   await page.getByRole("button", { name: "Tải lên" }).click();
 
@@ -153,10 +122,6 @@ async function loginAndUploadReadyDocument(page: Page): Promise<string> {
 }
 
 test.describe("Phase 4 Grounded Assistant QA browser journey", () => {
-  test.afterAll(() => {
-    cleanDatabase();
-  });
-
   test("full journey: asks question, verifies grounded answer with citation chip, and navigates to exact source block", async ({
     page,
   }) => {

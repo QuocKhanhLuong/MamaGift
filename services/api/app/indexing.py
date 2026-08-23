@@ -392,6 +392,18 @@ async def index_document(
 
     parse_run = session.scalar(stmt)
     if parse_run is None:
+        doc = session.get(Document, document_id)
+        if doc is not None:
+            doc.error_code = "parse_run_not_found"
+            doc.error_message = f"no matching parse run found for document {document_id!r}"
+            curr_status = DocumentStatus(doc.status)
+            if curr_status == DocumentStatus.READY_FOR_REVIEW:
+                set_document_status(doc, DocumentStatus.INDEXING)
+                set_document_status(doc, DocumentStatus.PARSE_FAILED)
+                session.commit()
+            elif curr_status == DocumentStatus.INDEXING:
+                set_document_status(doc, DocumentStatus.PARSE_FAILED)
+                session.commit()
         raise IndexingError(
             f"no matching parse run found for document {document_id!r}",
             code="parse_run_not_found",
@@ -431,6 +443,18 @@ def index_document_sync(
 
     parse_run = session.scalar(stmt)
     if parse_run is None:
+        doc = session.get(Document, document_id)
+        if doc is not None:
+            doc.error_code = "parse_run_not_found"
+            doc.error_message = f"no matching parse run found for document {document_id!r}"
+            curr_status = DocumentStatus(doc.status)
+            if curr_status == DocumentStatus.READY_FOR_REVIEW:
+                set_document_status(doc, DocumentStatus.INDEXING)
+                set_document_status(doc, DocumentStatus.PARSE_FAILED)
+                session.commit()
+            elif curr_status == DocumentStatus.INDEXING:
+                set_document_status(doc, DocumentStatus.PARSE_FAILED)
+                session.commit()
         raise IndexingError(
             f"no matching parse run found for document {document_id!r}",
             code="parse_run_not_found",

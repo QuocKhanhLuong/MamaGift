@@ -1,12 +1,27 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "../../..");
 const FIXTURE_PDF = path.resolve(
   __dirname,
   "../../../benchmarks/parser/fixtures/quyet_dinh_dieu_khoan.pdf",
 );
+const SYNTHETIC_FIXTURES_DIR = path.join(REPO_ROOT, "var", "test_fixtures");
+
+function prepareUniquePdf(basePath: string, tag: string): string {
+  fs.mkdirSync(SYNTHETIC_FIXTURES_DIR, { recursive: true });
+  const targetPath = path.join(
+    SYNTHETIC_FIXTURES_DIR,
+    `${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.pdf`,
+  );
+  const content = fs.readFileSync(basePath);
+  const trailerComment = Buffer.from(`\n% unique_test_fixture_${tag}_${Date.now()}\n`);
+  fs.writeFileSync(targetPath, Buffer.concat([content, trailerComment]));
+  return targetPath;
+}
 
 /**
  * Required Phase 3 browser E2E flow (`docs/04_PHASE_PLAN.md` Phase 3):
@@ -14,6 +29,9 @@ const FIXTURE_PDF = path.resolve(
  * cited page -> correct field -> reload -> correction persists.
  */
 test("upload, verify, correct, and reload keeps the correction", async ({ page }) => {
+  const fixturePath = prepareUniquePdf(FIXTURE_PDF, "upload_verify_correct");
+  const fileName = path.basename(fixturePath);
+
   await page.goto("/");
   await expect(page).toHaveURL(/\/dang-nhap$/);
 
@@ -23,8 +41,8 @@ test("upload, verify, correct, and reload keeps the correction", async ({ page }
   await expect(page.getByRole("heading", { name: "Văn bản" })).toBeVisible();
 
   await page.getByRole("button", { name: "Tải văn bản PDF" }).click();
-  await page.setInputFiles("#upload-file-input", FIXTURE_PDF);
-  await expect(page.getByText("quyet_dinh_dieu_khoan.pdf")).toBeVisible();
+  await page.setInputFiles("#upload-file-input", fixturePath);
+  await expect(page.getByText(fileName, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Tải lên" }).click();
 
   await expect(page).toHaveURL(/\/van-ban\/doc_/);

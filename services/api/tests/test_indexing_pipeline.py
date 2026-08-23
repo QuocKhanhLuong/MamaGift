@@ -23,6 +23,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import indexing, ingestion
 from app.db import get_engine
 from app.indexing import (
     IndexingError,
@@ -1026,3 +1027,97 @@ def test_sqlite_foreign_keys_reject_violating_chunk_insert(
         engine.dispose()
         get_engine.cache_clear()
         get_settings.cache_clear()
+
+
+def test_index_document_missing_parse_run_records_failure_on_document(
+    session: Session,
+) -> None:
+    doc = Document(
+        id="doc_unindexable_orphan",
+        filename="orphan.pdf",
+        content_type="application/pdf",
+        byte_size=100,
+        checksum_sha256="sha_orphan",
+        storage_uri="local://orphan",
+        status=DocumentStatus.READY_FOR_REVIEW.value,
+    )
+    session.add(doc)
+    session.commit()
+
+    with pytest.raises(IndexingError, match="no matching parse run found"):
+        index_document_sync(session, "doc_unindexable_orphan")
+
+    session.refresh(doc)
+    assert doc.status == DocumentStatus.PARSE_FAILED.value
+    assert doc.error_code == "parse_run_not_found"
+    assert "no matching parse run found" in (doc.error_message or "")
+
+
+def test_worker_drain_resilience_continues_when_indexing_fails(
+    client: TestClient,
+    upload,
+    session: Session,
+    storage: LocalObjectStorage,
+    settings: Settings,
+    fixture_paths: dict[str, Any],
+) -> None:
+    upload(client, fixture_paths["quyet_dinh"].read_bytes(), filename="failing-doc.pdf")
+    upload(client, fixture_paths["cong_van"].read_bytes(), filename="succeeding-doc.pdf")
+
+    docs = list(session.scalars(select(Document).order_by(Document.created_at.asc())).all())
+    assert len(docs) == 2
+    doc_fail, doc_success = docs[0], docs[1]
+
+    provider = FakeEmbeddingProvider()
+    real_index_sync = indexing.index_parse_run_sync
+
+    def flaky_index_sync(
+        sess: Session,
+        parse_run: ParseRun,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        if parse_run.document_id == doc_fail.id:
+            # Simulate a missing parse run or indexing error for doc_fail
+            failing_doc = sess.get(Document, doc_fail.id)
+            if failing_doc is not None:
+                failing_doc.error_code = "parse_run_not_found"
+                failing_doc.error_message = (
+                    f"no matching parse run found for document {doc_fail.id!r}"
+                )
+                if DocumentStatus(failing_doc.status) == DocumentStatus.READY_FOR_REVIEW:
+                    ingestion.set_document_status(failing_doc, DocumentStatus.INDEXING)
+                    ingestion.set_document_status(failing_doc, DocumentStatus.PARSE_FAILED)
+                sess.commit()
+            raise IndexingError(
+                f"no matching parse run found for document {doc_fail.id!r}",
+                code="parse_run_not_found",
+            )
+        return real_index_sync(sess, parse_run, *args, **kwargs)
+
+    with patch.object(indexing, "index_parse_run_sync", side_effect=flaky_index_sync):
+        processed = drain(
+            session,
+            storage,
+            settings,
+            "worker-test",
+            auto_index=True,
+            embedding_provider=provider,
+        )
+
+    assert processed == 2
+
+    session.refresh(doc_fail)
+    session.refresh(doc_success)
+
+    assert doc_fail.status == DocumentStatus.PARSE_FAILED.value
+    assert doc_fail.error_code == "parse_run_not_found"
+
+    assert doc_success.status == DocumentStatus.READY.value
+    assert doc_success.error_code is None
+    success_chunks = list(
+        session.scalars(
+            select(DocumentChunk).where(DocumentChunk.document_id == doc_success.id)
+        ).all()
+    )
+    assert len(success_chunks) > 0

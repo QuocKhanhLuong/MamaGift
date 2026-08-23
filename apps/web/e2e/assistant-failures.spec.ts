@@ -110,6 +110,7 @@ async function indexDocumentInDb(documentId: string): Promise<void> {
 import time
 from app.db import get_session_factory
 from app.indexing import index_document_sync
+from app.models import Document
 from app.settings import get_settings
 
 session_factory = get_session_factory()
@@ -118,10 +119,13 @@ settings = get_settings()
 for _ in range(60):
     try:
         with session_factory() as session:
-            index_document_sync(session, ${JSON.stringify(documentId)}, settings=settings)
-            break
+            doc = session.get(Document, ${JSON.stringify(documentId)})
+            if doc and doc.status in ("READY_FOR_REVIEW", "READY", "INDEXING"):
+                index_document_sync(session, ${JSON.stringify(documentId)}, settings=settings)
+                break
     except Exception:
-        time.sleep(0.5)
+        pass
+    time.sleep(0.5)
 else:
     with session_factory() as session:
         index_document_sync(session, ${JSON.stringify(documentId)}, settings=settings)
@@ -134,8 +138,9 @@ async function setDocumentStatusInDb(
   errorCode: string = "parse_failed",
 ): Promise<void> {
   await runPython(`
+from sqlalchemy import select
 from app.db import get_session_factory
-from app.models import Document
+from app.models import Document, Job, JobStatus
 
 session_factory = get_session_factory()
 with session_factory() as session:
@@ -143,6 +148,10 @@ with session_factory() as session:
     if doc:
         doc.status = ${JSON.stringify(status)}
         doc.error_code = ${JSON.stringify(errorCode)}
+        jobs = session.scalars(select(Job).where(Job.document_id == doc.id)).all()
+        for j in jobs:
+            if j.status in (JobStatus.QUEUED.value, JobStatus.LEASED.value):
+                j.status = JobStatus.FAILED_TERMINAL.value
         session.commit()
 `);
 }
@@ -181,11 +190,12 @@ with session_factory() as session:
 
 async function reprocessAndIndexInDb(documentId: string): Promise<string> {
   const output = await runPython(`
+import time
 from sqlalchemy import select
 from app.db import get_session_factory
 from app.dependencies import get_storage
 from app.indexing import index_document_sync
-from app.models import Document
+from app.models import Document, ParseRun
 from app.settings import get_settings
 from app.worker import process_next_job
 from app import ingestion
@@ -199,7 +209,14 @@ with session_factory() as session:
     assert doc is not None
     job = ingestion.reprocess_document(session, doc, settings)
     run = process_next_job(session, storage, settings, "reprocess-worker")
-    assert run is not None
+    if run is None:
+        for _ in range(60):
+            session.expire_all()
+            run = session.scalar(select(ParseRun).where(ParseRun.document_id == doc.id, ParseRun.version == 2))
+            if run is not None:
+                break
+            time.sleep(0.5)
+    assert run is not None, "reprocess run not found"
     index_document_sync(session, doc.id, settings=settings)
     print(run.id)
 `);
