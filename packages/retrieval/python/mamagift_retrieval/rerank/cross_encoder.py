@@ -10,7 +10,7 @@ import httpx
 from mamagift_contracts.rerank import RerankRequest, RerankResult
 from mamagift_retrieval.search.types import ScoredChunk
 
-from .protocol import validate_rerank_candidates
+from .protocol import validate_archive_rerank_candidates, validate_rerank_candidates
 
 
 class RerankerSettings(Protocol):
@@ -37,6 +37,7 @@ class CrossEncoderReranker:
         reranker_version: str | None = None,
         timeout_seconds: float = 30.0,
         client: httpx.AsyncClient | None = None,
+        cross_document: bool = False,
     ) -> None:
         clean_base = base_url.strip() if base_url else ""
         clean_model = model.strip() if model else ""
@@ -56,6 +57,7 @@ class CrossEncoderReranker:
             raise ValueError("reranker_version must not be empty")
         self._client = client
         self._owns_client = client is None
+        self._cross_document = cross_document
 
     @classmethod
     def from_settings(
@@ -78,6 +80,10 @@ class CrossEncoderReranker:
     @property
     def reranker_version(self) -> str:
         return self._reranker_version
+
+    @property
+    def supports_cross_document(self) -> bool:
+        return self._cross_document
 
     def _endpoint(self) -> str:
         if self.base_url.endswith("/rerank"):
@@ -117,7 +123,10 @@ class CrossEncoderReranker:
     async def rerank(
         self, query: str, candidates: list[ScoredChunk], top_k: int
     ) -> list[ScoredChunk]:
-        validate_rerank_candidates(candidates)
+        if self._cross_document:
+            validate_archive_rerank_candidates(candidates)
+        else:
+            validate_rerank_candidates(candidates)
         if not query.strip():
             raise ValueError("query must not be empty")
         if not candidates or top_k <= 0:

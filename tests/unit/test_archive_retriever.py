@@ -80,6 +80,12 @@ class FakeArchiveReranker:
     def reranker_version(self) -> str:
         return self._reranker_version
 
+    @property
+    def supports_cross_document(self) -> bool:
+        # ArchiveRetriever refuses a reranker that validates candidates as single-document,
+        # because the shipped rerankers do exactly that unless built with cross_document=True.
+        return True
+
     async def rerank(
         self,
         query: str,
@@ -1113,6 +1119,10 @@ def test_reranker_leak_raises_value_error(
             @property
             def reranker_version(self) -> str:
                 return "leaking-reranker-v1"
+
+            @property
+            def supports_cross_document(self) -> bool:
+                return True
 
             async def rerank(self, query, candidates, top_k):
                 from mamagift_retrieval.chunk import Chunk, ChunkType

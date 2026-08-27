@@ -76,6 +76,18 @@ class ArchiveRetriever:
                 f"rerank_top_k={rerank_top_k}"
             )
 
+        # Reject a single-document reranker at construction rather than at query time.
+        # Both shipped rerankers validate their input internally, and the default validator
+        # requires every candidate to share one document/version/parse run -- correct for
+        # Phase 4 and structurally wrong here. A reranker built without cross_document=True
+        # would therefore raise deep inside the first archive question; failing here names the
+        # real cause instead.
+        if not getattr(reranker, "supports_cross_document", False):
+            raise ValueError(
+                "archive retrieval requires a reranker built with cross_document=True; "
+                f"{type(reranker).__name__} validates candidates as single-document"
+            )
+
         self._index = index
         self._embedding_provider = embedding_provider
         self._reranker = reranker

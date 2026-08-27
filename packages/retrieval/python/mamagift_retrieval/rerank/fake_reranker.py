@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 
 from mamagift_retrieval.search.types import ScoredChunk
 
-from .protocol import validate_rerank_candidates
+from .protocol import validate_archive_rerank_candidates, validate_rerank_candidates
 
 CandidateOrder = Sequence[str | int]
 
@@ -28,6 +28,7 @@ class FakeReranker:
         ordering: CandidateOrder | None = None,
         seed: int = 0,
         reranker_version: str = "fake-reranker-v1",
+        cross_document: bool = False,
     ) -> None:
         if ordering is not None and orderings is not None:
             raise ValueError("provide either orderings or ordering, not both")
@@ -36,6 +37,7 @@ class FakeReranker:
 
         self._seed = seed
         self._reranker_version = reranker_version
+        self._cross_document = cross_document
         self._ordering: tuple[str | int, ...] | None = None
         self._orderings: dict[str, tuple[str | int, ...]] = {}
         chosen = ordering if ordering is not None else orderings
@@ -52,6 +54,10 @@ class FakeReranker:
     @property
     def reranker_version(self) -> str:
         return self._reranker_version
+
+    @property
+    def supports_cross_document(self) -> bool:
+        return self._cross_document
 
     @staticmethod
     def _validate_order(query: str, order: CandidateOrder) -> None:
@@ -91,7 +97,10 @@ class FakeReranker:
     async def rerank(
         self, query: str, candidates: list[ScoredChunk], top_k: int
     ) -> list[ScoredChunk]:
-        validate_rerank_candidates(candidates)
+        if self._cross_document:
+            validate_archive_rerank_candidates(candidates)
+        else:
+            validate_rerank_candidates(candidates)
         if not candidates or top_k <= 0:
             return []
 

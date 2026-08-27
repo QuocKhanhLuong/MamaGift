@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 
@@ -229,3 +230,49 @@ def test_fake_reranker_single_document_path_untouched() -> None:
     assert [item.chunk.chunk_id for item in result] == ["c2", "c1"]
     assert [item.rank for item in result] == [1, 2]
     assert [item.retriever for item in result] == ["reranked", "reranked"]
+
+
+def test_shipped_rerankers_are_single_document_unless_told_otherwise() -> None:
+    """The shipped rerankers validate their own input, and the default is single-document.
+
+    This was a real integration defect: ArchiveRetriever fused correct multi-document
+    candidates and then handed them to FakeReranker, whose internal
+    validate_rerank_candidates rejected them. Every unit had passed in isolation. The flag
+    makes the archive path declare its intent, and ArchiveRetriever refuses a reranker that
+    has not.
+    """
+    multi = [
+        ScoredChunk(
+            chunk=_chunk("doc_a:c1", document_id="doc_a", parse_run_id="prun_a"),
+            score=0.9,
+            rank=1,
+            retriever="fused",
+        ),
+        ScoredChunk(
+            chunk=_chunk("doc_b:c1", document_id="doc_b", parse_run_id="prun_b"),
+            score=0.8,
+            rank=2,
+            retriever="fused",
+        ),
+    ]
+
+    assert FakeReranker().supports_cross_document is False
+    assert FakeReranker(cross_document=True).supports_cross_document is True
+
+    with pytest.raises(ValueError, match="share document, version, and parse run"):
+        asyncio.run(FakeReranker().rerank("q", multi, 10))
+
+    reranked = asyncio.run(FakeReranker(cross_document=True).rerank("q", multi, 10))
+    assert {item.chunk.document_id for item in reranked} == {"doc_a", "doc_b"}
+
+
+def test_archive_retriever_refuses_a_single_document_reranker() -> None:
+    """Fail at construction, naming the cause, rather than deep inside the first question."""
+    from mamagift_retrieval.archive.retriever import ArchiveRetriever
+
+    with pytest.raises(ValueError, match="cross_document=True"):
+        ArchiveRetriever(
+            index=cast(Any, object()),
+            embedding_provider=cast(Any, object()),
+            reranker=FakeReranker(),
+        )
