@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import Document, FeedbackEvent, Job, ParseRun
 
@@ -206,6 +206,60 @@ class FeedbackResponse(BaseModel):
             comment=event.comment,
             created_at=event.created_at,
         )
+
+
+class ArchiveFilterRequest(BaseModel):
+    """Metadata restriction for an archive question.
+
+    `None` means "no restriction on this field". An empty list means "match nothing" and is
+    never widened to "match everything" -- see `mamagift_retrieval.archive.ArchiveFilter`.
+    There is deliberately no field that relaxes current-version isolation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] | None = None
+    document_types: list[str] | None = None
+    document_numbers: list[str] | None = None
+    issuers: list[str] | None = None
+    issued_date_from: date | None = None
+    issued_date_to: date | None = None
+    include_requires_review: bool = True
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> ArchiveFilterRequest:
+        """Reject a reversed range at the transport boundary, not deep in retrieval.
+
+        `ArchiveFilter` enforces the same rule, but a ValueError raised while converting the
+        request would surface as a 500. A malformed request is the client's error and must be
+        a 422.
+        """
+        if (
+            self.issued_date_from is not None
+            and self.issued_date_to is not None
+            and self.issued_date_from > self.issued_date_to
+        ):
+            raise ValueError(
+                f"issued_date_from {self.issued_date_from} is after "
+                f"issued_date_to {self.issued_date_to}"
+            )
+        return self
+
+
+class ArchiveQaRequest(BaseModel):
+    """The archive-wide Q&A request body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=2000)
+    filters: ArchiveFilterRequest | None = None
+
+    @field_validator("question")
+    @classmethod
+    def question_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
 
 
 class QaRequest(BaseModel):

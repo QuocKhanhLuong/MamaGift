@@ -26,6 +26,7 @@ FEEDBACK_FIELD_INVALID = "feedback_field_invalid"
 PARSER_STRATEGY_UNDECIDED = "parser_strategy_undecided"
 AI_WORKER_UNAVAILABLE = "ai_worker_unavailable"
 DOCUMENT_NOT_INDEXED = "document_not_indexed"
+ARCHIVE_NOT_INDEXED = "archive_not_indexed"
 QA_SCOPE_VIOLATION = "qa_scope_violation"
 INTERNAL_ERROR = "internal_error"
 

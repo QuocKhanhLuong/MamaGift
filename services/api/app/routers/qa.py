@@ -56,7 +56,7 @@ def get_document_index(
 DocumentIndexDep = Annotated[DocumentIndex, Depends(get_document_index)]
 
 
-def _get_chat_provider(settings: Settings) -> ChatCompletionProvider:
+def get_chat_provider(settings: Settings) -> ChatCompletionProvider:
     if settings.app_env == "test":
         return FakeChatProvider(model=settings.llm_model, provider_name="fake_chat")
     return OpenAICompatibleChatProvider(
@@ -77,7 +77,7 @@ def get_qa_service(
     """Compose QaService behind provider and index interfaces."""
 
     return QaService(
-        chat_provider=_get_chat_provider(settings),
+        chat_provider=get_chat_provider(settings),
         embedding_provider=embedding_provider,
         document_index=document_index,
         reranker=FakeReranker(),
@@ -217,6 +217,7 @@ async def answer_document_question(
 
 __all__ = [
     "answer_document_question",
+    "get_chat_provider",
     "get_document_index",
     "get_embedding_provider",
     "get_qa_service",
