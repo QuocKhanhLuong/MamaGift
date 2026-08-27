@@ -28,6 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 from .state_machine import DocumentStatus, JobStatus
+from .vector_type import EMBEDDING_DIM, EmbeddingVector
 
 
 class Document(Base):
@@ -221,7 +222,9 @@ class DocumentChunk(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(
+        EmbeddingVector(EMBEDDING_DIM), nullable=True
+    )
     embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     embedding_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 

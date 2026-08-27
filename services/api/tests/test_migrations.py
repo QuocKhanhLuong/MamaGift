@@ -19,8 +19,16 @@ from sqlalchemy.orm import Session
 
 from alembic import command
 from app.models import Document, DocumentChunk, ParseRun
+from app.vector_type import EMBEDDING_DIM
 
 ALEMBIC_INI = "services/api/alembic.ini"
+
+# From 0005_phase5_pgvector onward, document_chunks.embedding is a real `vector(1024)` on
+# PostgreSQL, so a hand-written 3-element literal is rejected by the database itself. Keep the
+# distinctive leading values these assertions were written around and zero-pad to the declared
+# dimension: the round trip is still exact, and it now exercises the shipped column type.
+SAMPLE_EMBEDDING: list[float] = [0.12, -0.34, 0.56] + [0.0] * (EMBEDDING_DIM - 3)
+ORM_EMBEDDING: list[float] = [0.1, 0.2] + [0.0] * (EMBEDDING_DIM - 2)
 
 EXPECTED_TABLES = {
     "app_metadata",
@@ -523,7 +531,7 @@ def test_document_chunks_exact_data_round_trip(upgraded) -> None:
                 "text_val": "Cộng hòa Xã hội Chủ nghĩa Việt Nam",
                 "token_count": 42,
                 "now": now,
-                "emb": json.dumps([0.12, -0.34, 0.56]),
+                "emb": json.dumps(SAMPLE_EMBEDDING),
             },
         )
 
@@ -590,7 +598,7 @@ def test_document_chunks_exact_data_round_trip(upgraded) -> None:
         if isinstance(row_embedded["embedding"], str)
         else row_embedded["embedding"]
     )
-    assert emb_data == [0.12, -0.34, 0.56]
+    assert emb_data == pytest.approx(SAMPLE_EMBEDDING)
     assert row_embedded["embedding_model"] == "bge-m3"
     assert row_embedded["embedding_version"] == "v1"
 
@@ -735,7 +743,7 @@ def test_document_chunks_orm_mapping_and_relationships(upgraded) -> None:
             source_block_ids=["b1"],
             text="ORM text chunk",
             token_count=15,
-            embedding=[0.1, 0.2],
+            embedding=ORM_EMBEDDING,
             embedding_model="bge-m3",
             embedding_version="v1",
             created_at=now,
