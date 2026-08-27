@@ -6,14 +6,17 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 **Phase 4 — Self-hosted LLM and grounded single-document Q&A**
 
-Status: `COMPLETE_WITH_EXTERNAL_OCR_BLOCKER` (see the exit-evidence entry at the end
-of this file)
+Status: `COMPLETE`
 
-Grounded single-document Q&A works end to end with verifiable page/block citations,
-and every Phase 4 gate is green. It is **not** unqualified `COMPLETE`: every fixture
-proving it is born-digital or synthetic, because the PP-StructureV3/OCR blocker means
-a real scanned Vietnamese document still yields no critical fields. Phases 1, 2 and 3
-remain `IN_PROGRESS` for that same reason.
+Known blocker: real scanned-document production evidence — ADR-001 `PENDING EVIDENCE`
+
+Every Phase 4 exit criterion passed and every gate is green, so the execution status is
+`COMPLETE` (see the exit-evidence entry at the end of this file). That is deliberately
+separated from the limitation it carries: every fixture proving Phase 4 is born-digital or
+synthetic, because the PP-StructureV3/OCR blocker means a real scanned Vietnamese document
+still yields no critical fields. Phase 4 is therefore complete as specified and **not**
+production-ready for scanned input. Phases 1, 2 and 3 stay `IN_PROGRESS` because that
+blocker sits inside their own exit criteria, not merely alongside them.
 
 ### Previously active phase
 
@@ -88,15 +91,16 @@ production parser. Running the private benchmark is what closes both phases.
 | 2 | Production ingestion and Vietnamese administrative structure | IN_PROGRESS | Commit `fc71f8b`; ingestion pipeline, APIs, schema, admin parser and local Phase 2 gates complete; production parser strategy still blocked on ADR-001 |
 | 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`/`c75c489`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
 | 3.5 | Evaluation + Retrieval Foundation | COMPLETE | see entry below; deterministic foundation only — no embeddings, vector store, reranker, memory backend or LLM |
-| 4 | Self-hosted LLM and grounded single-document Q&A | COMPLETE_WITH_EXTERNAL_OCR_BLOCKER | see entry below; grounded QA green end to end on born-digital/synthetic fixtures only |
-| 5 | Cross-document institutional memory | BLOCKED_BY_PHASE_4 | — |
+| 4 | Self-hosted LLM and grounded single-document Q&A | COMPLETE | see entry below; grounded QA green end to end on born-digital/synthetic fixtures only. Known blocker: real scanned-document evidence (ADR-001) |
+| 5 | Cross-document institutional memory | IN_PROGRESS | Phase 4 is COMPLETE, so Phase 5 is unblocked; see the Phase 5 plan in `docs/superpowers/plans/` |
 | 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
 | 7 | Production hardening and low-cost deployment | BLOCKED_BY_PHASE_6 | — |
 | 8 | Meeting assistant | PARKED | document product must be stable/useful first |
 
 ## Status values
 
-Use only:
+A phase's `Status:` is drawn from this closed set and nothing else. `tools/ci/check_docs.py`
+enforces it, so a status outside this list fails CI rather than accumulating as drift.
 
 ```text
 NOT_STARTED
@@ -106,6 +110,25 @@ COMPLETE
 BLOCKED_BY_PHASE_<N>
 PARKED
 ```
+
+### Execution status and carried limitations are separate
+
+A phase that met every exit criterion is `COMPLETE`, even when it inherits a limitation that
+is out of its scope to solve. The limitation is recorded on its own line instead of being
+welded into the status value:
+
+```text
+Status: COMPLETE
+Known blocker: <one line naming the limitation and the ADR or evidence that tracks it>
+```
+
+This exists because the tracker previously carried
+`COMPLETE_WITH_EXTERNAL_OCR_BLOCKER`, which was not in the allowed set — a status that no
+tool could validate and that conflated "did the phase finish?" with "what is still missing?".
+Those are different questions and both deserve an honest answer. A `Known blocker:` line is
+NOT a softer `COMPLETE`: if the blocker sits inside the phase's own exit criteria, the phase
+is `IN_PROGRESS` or `BLOCKED`, not complete. Phases 1, 2 and 3 are the worked example —
+they stay `IN_PROGRESS` for the same OCR blocker that Phase 4 merely carries.
 
 ## Update rules
 
