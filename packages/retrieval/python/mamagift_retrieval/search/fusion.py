@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from mamagift_retrieval.archive.protocol import validate_archive_scope
 from mamagift_retrieval.scope import EvidenceScope, scope_matches
 
 from .types import ScoredChunk
@@ -30,11 +31,45 @@ def reciprocal_rank_fusion(
         raise ValueError("scope is required when fusing non-empty retrieval results")
     _validate_fusion_scope(scope)
 
+    for result_list in ranked_results:
+        _validate_result_list(result_list, scope)
+
+    return _fuse_by_rank(ranked_results)
+
+
+def archive_reciprocal_rank_fusion(
+    ranked_results: Sequence[Sequence[ScoredChunk]],
+    scope: EvidenceScope | None = None,
+    *,
+    allowed_documents: set[str] | None = None,
+) -> list[ScoredChunk]:
+    """Fuse one or more retriever result lists across multiple current archive documents.
+
+    Candidates may span multiple documents, but each candidate must match the archive scope
+    and (if provided) its ``chunk.document_id`` must be in ``allowed_documents``.
+    Raw scores are deliberately ignored; only ranks contribute.
+    """
+    if not ranked_results or not any(ranked_results):
+        return []
+
+    if scope is None:
+        raise ValueError("scope is required when fusing non-empty retrieval results")
+    validate_archive_scope(scope)
+
+    for result_list in ranked_results:
+        _validate_result_list(result_list, scope, allowed_documents=allowed_documents)
+
+    return _fuse_by_rank(ranked_results)
+
+
+def _fuse_by_rank(
+    ranked_results: Sequence[Sequence[ScoredChunk]],
+) -> list[ScoredChunk]:
+    """Rank-accumulation and ordering maths shared by both fusion entry points."""
     fused_scores: dict[str, float] = {}
     chunks: dict[str, ScoredChunk] = {}
 
     for result_list in ranked_results:
-        _validate_result_list(result_list, scope)
         for result in result_list:
             chunk_id = result.chunk.chunk_id
             # Only rank contributes at the fusion boundary; result.score is never read.
@@ -68,6 +103,8 @@ def _validate_fusion_scope(scope: EvidenceScope) -> None:
 def _validate_result_list(
     result_list: Sequence[ScoredChunk],
     scope: EvidenceScope,
+    *,
+    allowed_documents: set[str] | None = None,
 ) -> None:
     """Validate dense ranks, unique membership, and full chunk provenance."""
     seen_ids: set[str] = set()
@@ -82,6 +119,12 @@ def _validate_result_list(
         if chunk_id in seen_ids:
             raise ValueError(f"duplicate chunk_id {chunk_id!r} in one retriever result list")
         seen_ids.add(chunk_id)
+
+        if allowed_documents is not None and result.chunk.document_id not in allowed_documents:
+            raise ValueError(
+                f"chunk {chunk_id!r} from document {result.chunk.document_id!r} "
+                "is not in allowed_documents"
+            )
 
         candidate_scope = EvidenceScope(
             family_id=scope.family_id,
@@ -100,4 +143,8 @@ def _validate_result_list(
             )
 
 
-__all__ = ["RRF_K", "reciprocal_rank_fusion"]
+__all__ = [
+    "RRF_K",
+    "archive_reciprocal_rank_fusion",
+    "reciprocal_rank_fusion",
+]
