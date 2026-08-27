@@ -8,13 +8,16 @@ while the authoritative versioned artifact stays in `parse_runs.canonical`.
 from __future__ import annotations
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -241,4 +244,90 @@ class DocumentChunk(Base):
         back_populates="document_chunks",
         foreign_keys=[parse_run_id, document_id, document_version],
         overlaps="document,document_chunks",
+    )
+
+
+class RelationType(StrEnum):
+    REFERENCES = "references"
+    AMENDS = "amends"
+    REPLACES = "replaces"
+    SUPERSEDES = "supersedes"
+
+
+class RelationReviewState(StrEnum):
+    UNVERIFIED = "unverified"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+
+
+class DocumentRelation(Base):
+    """A cross-document relationship record (Phase 5 cross-document memory).
+
+    Records references, amendments, replacements, or supersessions between documents
+    with block-level provenance and confidence scoring.
+    """
+
+    __tablename__ = "document_relations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["source_parse_run_id", "source_document_id", "source_document_version"],
+            ["parse_runs.id", "parse_runs.document_id", "parse_runs.version"],
+            ondelete="CASCADE",
+            name="fk_document_relations_source_provenance",
+        ),
+        CheckConstraint(
+            "target_document_id IS NOT NULL OR target_document_number IS NOT NULL",
+            name="ck_document_relations_target_present",
+        ),
+        CheckConstraint(
+            "confidence >= 0.0 AND confidence <= 1.0",
+            name="ck_document_relations_confidence_range",
+        ),
+        UniqueConstraint(
+            "source_parse_run_id",
+            "relation_type",
+            "target_document_number",
+            "target_document_id",
+            name="uq_document_relations_identity",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_parse_run_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    source_block_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    page_numbers: Mapped[list[int]] = mapped_column(JSON, nullable=False)
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    target_document_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    target_document_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    target_raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    review_state: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default="unverified",
+        default=RelationReviewState.UNVERIFIED.value,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    source_document: Mapped[Document] = relationship(
+        foreign_keys=[source_document_id],
+        overlaps="source_parse_run",
+    )
+    target_document: Mapped[Document | None] = relationship(
+        foreign_keys=[target_document_id],
+    )
+    source_parse_run: Mapped[ParseRun] = relationship(
+        foreign_keys=[source_parse_run_id, source_document_id, source_document_version],
+        overlaps="source_document",
     )

@@ -31,6 +31,7 @@ PRIVATE_TABLES: Final[frozenset[str]] = frozenset(
         "parse_runs",
         "feedback_events",
         "document_chunks",
+        "document_relations",
     }
 )
 
