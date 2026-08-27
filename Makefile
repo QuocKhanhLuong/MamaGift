@@ -16,6 +16,8 @@ COMPOSE_FILE ?= infra/compose/docker-compose.yml
 	compose-config docs-check repository-hygiene secret-scan check dev \
 	parser-contract-tests parser-benchmark-smoke parser-bench parser-fixtures \
 	ingestion-integration admin-parser-golden-tests db-migration-test worker serve-api \
+	archive-retrieval-tests archive-qa-tests archive-security-tests pgvector-integration \
+	archive-retrieval-eval \
 	web-component-tests web-e2e-smoke feedback-tests retrieval-eval-tests \
 	ai-worker-contract rag-unit-tests rag-eval-mini
 
@@ -116,6 +118,38 @@ rag-eval-mini:
 		tests/unit/test_failure_analysis.py tests/unit/test_ragas_adapter.py -q
 
 
+# Phase 5 cross-document retrieval gate: archive index, filters, fusion, rerank,
+# identifiers, freshness, relations and the multi-document evidence assembler.
+# Deterministic fakes only -- no model, GPU, network or private data.
+archive-retrieval-tests:
+	$(UV_RUN) pytest tests/unit/test_sql_archive_index.py tests/unit/test_archive_filters.py \
+		tests/unit/test_archive_fusion.py tests/unit/test_archive_rerank.py \
+		tests/unit/test_archive_identifiers.py tests/unit/test_archive_freshness.py \
+		tests/unit/test_archive_retriever.py tests/unit/test_archive_assembler.py \
+		tests/unit/test_relation_extraction.py -q
+
+# Phase 5 archive QA gate: service, endpoint and the incremental-indexing exit criterion.
+archive-qa-tests:
+	$(UV_RUN) pytest tests/unit/test_archive_qa_service.py \
+		services/api/tests/test_archive_qa_api.py \
+		services/api/tests/test_archive_incremental_indexing.py -q
+
+# Phase 5 security gate. Structural checks always run; the live Supabase probe skips with a
+# reason unless SUPABASE_URL/SUPABASE_ANON_KEY are set, so CI never needs credentials.
+archive-security-tests:
+	$(UV_RUN) pytest tests/security tests/integration/test_archive_adversarial.py -q
+
+# PostgreSQL + pgvector integration. Skips with a reason when MAMAGIFT_TEST_DATABASE_URL is
+# unset, so this target is safe to run without a database.
+pgvector-integration:
+	$(UV_RUN) pytest tests/integration services/api/tests/test_pgvector_migration.py \
+		services/api/tests/test_document_relations_migration.py -q
+
+# Phase 5 deterministic archive retrieval evaluation and the lexical/dense/hybrid/
+# hybrid+reranker baseline comparison. No model, no API key, no network.
+archive-retrieval-eval:
+	$(UV_RUN) pytest tests/unit/test_archive_eval_harness.py -q
+
 # Drain the parse queue once against the configured database and storage.
 worker:
 	$(API_RUN) python -m app.worker --once
@@ -146,6 +180,8 @@ check: docs-check repository-hygiene secret-scan backend-format-check backend-li
 	parser-contract-tests parser-benchmark-smoke \
 	ingestion-integration admin-parser-golden-tests db-migration-test feedback-tests retrieval-eval-tests \
 	ai-worker-contract rag-unit-tests rag-eval-mini \
+	archive-retrieval-tests archive-qa-tests archive-security-tests pgvector-integration \
+	archive-retrieval-eval \
 	frontend-format-check frontend-lint frontend-typecheck frontend-test frontend-build compose-config \
 	web-e2e-smoke
 

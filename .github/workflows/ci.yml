@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: mamagift
           POSTGRES_USER: mamagift
@@ -249,7 +249,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: mamagift
           POSTGRES_USER: mamagift
@@ -281,6 +281,120 @@ jobs:
         env:
           MAMAGIFT_TEST_DATABASE_URL: postgresql+psycopg://mamagift:mamagift@localhost:5432/mamagift
         run: uv run pytest services/api/tests/test_migrations.py -q
+
+  archive-retrieval-tests:
+    name: archive-retrieval-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Cross-document retrieval tests
+        run: make archive-retrieval-tests
+
+      - name: Archive retrieval evaluation and baseline comparison
+        run: make archive-retrieval-eval
+
+  incremental-indexing:
+    name: incremental-indexing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Archive QA and incremental indexing tests
+        run: make archive-qa-tests
+
+  archive-security-tests:
+    name: archive-security-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      # The live anonymous Supabase probe skips with a reason when SUPABASE_URL and
+      # SUPABASE_ANON_KEY are unset, so this job never requires credentials.
+      - name: Archive security and adversarial tests
+        run: make archive-security-tests
+
+  pgvector-integration:
+    name: pgvector-integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: mamagift
+          POSTGRES_USER: mamagift
+          POSTGRES_PASSWORD: mamagift
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mamagift -d mamagift"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.2"
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: PostgreSQL and pgvector integration tests
+        env:
+          MAMAGIFT_TEST_DATABASE_URL: postgresql+psycopg://mamagift:mamagift@localhost:5432/mamagift
+        run: make pgvector-integration
+
+      - name: Migration upgrade and downgrade against PostgreSQL
+        env:
+          MAMAGIFT_TEST_DATABASE_URL: postgresql+psycopg://mamagift:mamagift@localhost:5432/mamagift
+        run: uv run pytest services/api/tests/test_migrations.py services/api/tests/test_pgvector_migration.py -q
 
   feedback-tests:
     name: feedback-tests
