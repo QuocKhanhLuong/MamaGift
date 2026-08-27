@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "./components/shell/AppShell";
 import { ProtectedRoute } from "./components/shell/ProtectedRoute";
+import { ArchiveAssistantPage } from "./pages/ArchiveAssistantPage";
 import { ArchivePage } from "./pages/ArchivePage";
 import { DocumentPage } from "./pages/DocumentPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -21,6 +22,7 @@ export function App() {
         >
           <Route path="/van-ban" element={<ArchivePage />} />
           <Route path="/van-ban/:documentId" element={<DocumentPage />} />
+          <Route path="/tro-ly" element={<ArchiveAssistantPage />} />
         </Route>
         <Route path="/" element={<Navigate to="/van-ban" replace />} />
         <Route path="*" element={<Navigate to="/van-ban" replace />} />

@@ -1,6 +1,6 @@
 import { ArrowLeft } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { DocumentWorkspace } from "../components/workspace/DocumentWorkspace";
 import { ProcessingStatus } from "../components/processing/ProcessingStatus";
@@ -14,9 +14,42 @@ import { DOCUMENT_STATUS_LABEL, documentStatusTone, isOpenableDocument } from ".
 export function DocumentPage() {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { state, reload } = useDocumentStatus(documentId!);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const rawTrang = searchParams.get("trang");
+    const khoiList = searchParams.getAll("khoi");
+
+    if (rawTrang === null && khoiList.length === 0) {
+      return;
+    }
+
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete("trang");
+        next.delete("khoi");
+
+        if (rawTrang !== null) {
+          const parsedTrang = Number(rawTrang);
+          if (Number.isInteger(parsedTrang) && parsedTrang > 0) {
+            next.set("page", String(parsedTrang));
+          }
+        }
+
+        if (khoiList.length > 0) {
+          next.set("block", khoiList[0]);
+          next.set("blocks", khoiList.join(","));
+        }
+
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   if (state.kind === "loading") {
     return <div className="p-8 text-mg-text-muted">Đang mở văn bản…</div>;

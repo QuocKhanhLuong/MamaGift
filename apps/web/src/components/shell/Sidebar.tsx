@@ -1,12 +1,11 @@
-import { FileText } from "lucide-react";
+import { FileText, Sparkles } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { cn } from "../../lib/cn";
 
 /**
  * `docs/10_DESIGN_SYSTEM.md` section 6, `docs/design/01_INFORMATION_ARCHITECTURE.md` section 3.
- * `Văn bản` is the only primary destination in Phase 3; `Trợ lý` is a feature-gated
- * contextual surface and must not appear here before it is enabled.
+ * Primary navigation destinations: `Văn bản` (/van-ban) and `Trợ lý` (/tro-ly) enabled in Phase 5.
  */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -28,6 +27,21 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             Văn bản
           </NavLink>
           <p className="mt-1 pl-8 text-sm text-mg-text-muted">Gần đây (bộ lọc)</p>
+        </li>
+        <li>
+          <NavLink
+            to="/tro-ly"
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                "flex min-h-[44px] items-center gap-2 rounded-mg-sm px-2 text-[15px] font-medium text-mg-text",
+                isActive ? "bg-mg-accent-soft text-mg-accent" : "hover:bg-mg-surface-2",
+              )
+            }
+          >
+            <Sparkles aria-hidden="true" size={18} />
+            Trợ lý
+          </NavLink>
         </li>
       </ul>
     </nav>

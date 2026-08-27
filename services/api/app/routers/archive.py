@@ -23,7 +23,7 @@ from mamagift_retrieval.archive import ArchiveFilter
 from mamagift_retrieval.archive.protocol import AUTHORITATIVE_FAMILY_ID, ArchiveIndex
 from mamagift_retrieval.archive.sql_archive_index import SqlArchiveIndex
 from mamagift_retrieval.providers import EmbeddingProvider
-from mamagift_retrieval.rerank import FakeReranker, Reranker
+from mamagift_retrieval.rerank import CrossEncoderReranker, FakeReranker, Reranker
 from mamagift_retrieval.scope import EvidenceScope
 
 from .. import errors
@@ -51,14 +51,25 @@ def get_archive_index(
 ArchiveIndexDep = Annotated[ArchiveIndex, Depends(get_archive_index)]
 
 
-def get_archive_reranker() -> Reranker:
-    """The reranker used for archive retrieval.
+def get_archive_reranker(settings: SettingsDep) -> Reranker:
+    """Select the configured reranker, using the deterministic fake only under test.
 
-    `cross_document=True` is required: the shipped rerankers validate their own candidates,
-    and the default validator refuses a batch spanning several documents.
+    `cross_document=True` is required on either adapter: the shipped rerankers validate their
+    own candidates, and the default validator refuses a batch spanning several documents.
+
+    The fake is a deterministic shuffle, not a ranking model. Serving it outside tests would
+    actively degrade ordering -- `docs/eval/phase-5-baseline.md` measures exactly that -- so
+    production and development both get the real cross-encoder.
     """
 
-    return FakeReranker(cross_document=True)
+    if settings.app_env == "test":
+        return FakeReranker(cross_document=True)
+    return CrossEncoderReranker(
+        base_url=settings.ai_worker_base_url,
+        model=settings.reranker_model,
+        api_key=settings.ai_worker_token,
+        cross_document=True,
+    )
 
 
 ArchiveRerankerDep = Annotated[Reranker, Depends(get_archive_reranker)]
