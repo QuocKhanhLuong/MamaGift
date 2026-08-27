@@ -33,8 +33,30 @@ const INTERACTIVE_ROLES = [
   "searchbox",
 ] as const;
 
+/**
+ * On the document workspace at tablet and mobile widths the assistant is still not offered:
+ * the screen is for reading and verifying the source. The Phase 5 sidebar link lives in a
+ * closed drawer here, so nothing assistant-related should be reachable.
+ */
 async function assertNoInteractiveAssistantControls(page: Page) {
   for (const role of INTERACTIVE_ROLES) {
+    await expect(page.getByRole(role, { name: /Trợ lý/i })).toHaveCount(0);
+  }
+}
+
+/**
+ * Phase 3 asserted that no `Trợ lý` control existed anywhere, because the assistant was
+ * feature-gated and unbuilt. Phase 5 deliberately promotes it to a primary destination, so
+ * the assertion is now the opposite: exactly one navigation link, and no OTHER interactive
+ * assistant control loose on the archive screen. Simply deleting the check would have lost
+ * the guarantee that the archive screen stays uncluttered on small viewports.
+ */
+async function assertAssistantIsANavigationDestinationOnly(page: Page) {
+  const navigation = page.getByRole("navigation", { name: "Điều hướng chính" });
+  await expect(navigation.getByRole("link", { name: "Trợ lý" })).toHaveCount(1);
+
+  for (const role of INTERACTIVE_ROLES) {
+    if (role === "link") continue;
     await expect(page.getByRole(role, { name: /Trợ lý/i })).toHaveCount(0);
   }
 }
@@ -55,11 +77,15 @@ async function assertArchiveMenu(page: Page) {
   const navigation = page.getByRole("navigation", { name: "Điều hướng chính" });
   await expect(navigation).toBeVisible();
   await expect(navigation.getByRole("link", { name: "Văn bản" })).toBeVisible();
-  await assertNoInteractiveAssistantControls(page);
+  await expect(navigation.getByRole("link", { name: "Trợ lý" })).toBeVisible();
+  await assertAssistantIsANavigationDestinationOnly(page);
 
   await page.getByRole("button", { name: "Đóng menu" }).click();
   await expect(page.getByRole("button", { name: "Mở menu" })).toBeVisible();
-  await assertNoInteractiveAssistantControls(page);
+
+  // With the menu closed the assistant link is out of the way again, so the archive screen
+  // is not competing for space on a small viewport.
+  await expect(page.getByRole("link", { name: "Trợ lý" })).toHaveCount(0);
 }
 
 async function uploadReviewableDocument(page: Page) {
