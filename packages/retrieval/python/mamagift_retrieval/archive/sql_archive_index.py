@@ -80,7 +80,7 @@ def _build_chunk(chunk_row: DocumentChunk, doc_row: Document) -> Chunk:
         text=chunk_row.text,
         source_block_ids=source_block_ids,
         source_page_numbers=page_numbers,
-        metadata={},
+        metadata=dict(chunk_row.chunk_metadata or {}),
     )
 
 

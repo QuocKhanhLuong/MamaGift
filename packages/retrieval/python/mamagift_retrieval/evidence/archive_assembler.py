@@ -11,9 +11,36 @@ from mamagift_retrieval.budget import (
     EvidenceBudget,
     assemble_bounded_context,
 )
+from mamagift_retrieval.chunk import Chunk
 from mamagift_retrieval.evidence.assembler import Evidence, EvidenceSet
 from mamagift_retrieval.scope import EvidenceScope, scope_matches
 from mamagift_retrieval.search.types import ScoredChunk
+
+# Structured fields the chunker binds to a chunk rather than leaving loose in its text.
+# For a plan task these carry the owner and deadline, and keeping them attached is what stops
+# one task's owner being read off another's. Every value here is verbatim parsed text, so
+# rendering it into the evidence block adds no claim the document did not make.
+_RENDERED_METADATA_FIELDS: tuple[tuple[str, str], ...] = (
+    ("ordinal", "Số thứ tự"),
+    ("owner", "Đơn vị chủ trì"),
+    ("coordinating_unit", "Đơn vị phối hợp"),
+    ("deadline_raw", "Thời hạn hoàn thành"),
+)
+
+
+def render_evidence_text(chunk: Chunk) -> str:
+    """The text a model actually sees for one chunk, including its structured fields.
+
+    Without this the association lives only in `Chunk.metadata`, which never reaches the
+    prompt: a grounded answer could cite the chunk that holds a task but would have no
+    evidence for who owns it or when it is due, and would have to guess.
+    """
+    lines = [chunk.text]
+    for key, label in _RENDERED_METADATA_FIELDS:
+        value = chunk.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            lines.append(f"{label}: {value.strip()}")
+    return "\n".join(lines)
 
 
 def assemble_archive_evidence(
@@ -95,7 +122,9 @@ def assemble_archive_evidence(
         surviving_candidates.append((candidate, document_version))
 
     # 7. Feed surviving candidate text to assemble_bounded_context under "archive_semantic".
-    candidate_texts = [candidate.chunk.text for candidate, _ in surviving_candidates]
+    candidate_texts = [
+        render_evidence_text(candidate.chunk) for candidate, _ in surviving_candidates
+    ]
     offered_text = "".join(candidate_texts)
     bounded, breakdown = assemble_bounded_context(
         budget,
@@ -108,7 +137,8 @@ def assemble_archive_evidence(
     offset = 0
     for index, (candidate, document_version) in enumerate(surviving_candidates, start=1):
         chunk = candidate.chunk
-        end = min(offset + len(chunk.text), len(bounded_text))
+        rendered = render_evidence_text(chunk)
+        end = min(offset + len(rendered), len(bounded_text))
         evidence.append(
             Evidence(
                 citation_id=f"c{index}",
@@ -122,7 +152,7 @@ def assemble_archive_evidence(
                 text=bounded_text[offset:end],
             )
         )
-        offset += len(chunk.text)
+        offset += len(rendered)
 
     # 9. Return the assembled EvidenceSet.
     return EvidenceSet(
@@ -147,4 +177,8 @@ def group_evidence_by_document(evidence: EvidenceSet) -> dict[str, list[Evidence
     return grouped
 
 
-__all__ = ["assemble_archive_evidence", "group_evidence_by_document"]
+__all__ = [
+    "assemble_archive_evidence",
+    "group_evidence_by_document",
+    "render_evidence_text",
+]

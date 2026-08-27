@@ -9,6 +9,7 @@ via `DocumentIndex.replace` into the `document_chunks` table.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -27,8 +28,11 @@ from mamagift_retrieval.scope import EvidenceScope
 
 from .ingestion import set_document_status
 from .models import Document, ParseRun
+from .relation_extraction import persist_relations
 from .settings import Settings, get_settings
 from .state_machine import DocumentStatus
+
+logger = logging.getLogger(__name__)
 
 AUTHORITATIVE_FAMILY_ID = "mamagift"
 
@@ -305,6 +309,21 @@ async def index_parse_run(
 
         # Atomic persistence through DocumentIndex.replace
         stats = index.replace(effective_scope, entries)
+
+        # Extract document relations from the same canonical artefact, in the same indexing
+        # pass. These are deterministic regex extractions with block-level provenance, never
+        # model output. A relation failure must not fail indexing: chunks are what make a
+        # document answerable, while relations are an additional, optional signal that is
+        # always recomputed on the next reindex.
+        try:
+            persist_relations(session, parse_run)
+        except Exception:  # noqa: BLE001 - relations are best-effort, indexing is not
+            session.rollback()
+            logger.warning(
+                "relation extraction failed for parse run %s; indexing continues",
+                parse_run.id,
+                exc_info=True,
+            )
 
         # Transition INDEXING -> READY
         doc = session.get(Document, parse_run.document_id)

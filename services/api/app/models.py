@@ -225,6 +225,19 @@ class DocumentChunk(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # Structure-aware metadata from the chunker: for a plan task this is its owner,
+    # coordinating unit and deadline. Dropping it would break the task/owner/deadline
+    # association that the Kế hoạch gate protects. Named `chunk_metadata` because
+    # `metadata` is reserved on declarative models.
+    chunk_metadata: Mapped[dict[str, Any]] = mapped_column(
+        # A plain DDL string, not sqlalchemy.text(): the `text` column declared above
+        # shadows that name inside this class body.
+        JSON,
+        nullable=False,
+        default=dict,
+        server_default="'{}'",
+    )
+
     embedding: Mapped[list[float] | None] = mapped_column(
         EmbeddingVector(EMBEDDING_DIM), nullable=True
     )

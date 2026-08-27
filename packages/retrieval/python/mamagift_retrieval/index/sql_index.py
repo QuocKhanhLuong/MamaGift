@@ -96,7 +96,9 @@ def _row_to_chunk(row: DocumentChunk) -> Chunk:
         text=row.text,
         source_block_ids=source_block_ids,
         source_page_numbers=page_numbers,
-        metadata={},
+        # Restoring this is what keeps a plan task bound to its own owner and deadline
+        # across the database round trip.
+        metadata=dict(row.chunk_metadata or {}),
     )
 
 
@@ -248,6 +250,7 @@ class SqlDocumentIndex:
                         source_block_ids=entry.chunk.source_block_ids,
                         text=entry.chunk.text,
                         token_count=tok_count,
+                        chunk_metadata=dict(entry.chunk.metadata),
                         embedding=entry.embedding,
                         embedding_model=entry.embedding_model,
                         embedding_version=entry.embedding_version,
