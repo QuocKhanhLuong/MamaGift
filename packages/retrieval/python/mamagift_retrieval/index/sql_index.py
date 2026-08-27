@@ -33,6 +33,23 @@ def _validate_authoritative_family(scope: EvidenceScope) -> None:
             f"scope family_id {scope.family_id!r} is not authoritative; "
             f"expected {AUTHORITATIVE_FAMILY_ID!r}"
         )
+    _reject_archive_scope(scope)
+
+
+def _reject_archive_scope(scope: EvidenceScope) -> None:
+    """Refuse an archive wildcard on the single-document index.
+
+    `scope_matches` treats `archive_scope=True` as "any document in the family", so a
+    caller that set it here would turn every method below into a family-wide query the
+    moment a future refactor relaxed the `document_id` requirement. Cross-document
+    retrieval belongs to `mamagift_retrieval.archive`; this index must stay incapable
+    of it rather than merely unlikely to do it.
+    """
+    if scope.archive_scope:
+        raise ValueError(
+            "DocumentIndex scope must not be an archive wildcard; "
+            "use ArchiveIndex for cross-document retrieval"
+        )
 
 
 def _tokenize(text: str) -> set[str]:

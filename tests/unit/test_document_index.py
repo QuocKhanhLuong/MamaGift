@@ -1017,3 +1017,40 @@ def test_session_types_support(db_engine, session_factory) -> None:
     # 4. Custom callable factory
     idx4 = SqlDocumentIndex(lambda: Session(db_engine))
     assert idx4.stats(scope).total_chunks == 1
+
+
+def test_document_index_rejects_archive_scope_on_every_method(
+    session_factory, index: SqlDocumentIndex
+) -> None:
+    """An archive wildcard must be refused, not silently treated as one document.
+
+    ``scope_matches`` reads ``archive_scope=True`` as "any document in this family". If
+    the single-document index accepted it, every method here would become a family-wide
+    query the moment the ``document_id`` requirement was relaxed. Deleting
+    ``_reject_archive_scope`` must make this test fail.
+    """
+    _seed_document(session_factory, "doc_arch")
+    entries = [
+        IndexEntry(
+            chunk=_make_chunk("doc_arch:c1", "doc_arch", "prun_arch"),
+            chunk_index=0,
+        )
+    ]
+    archive_scope = EvidenceScope(
+        family_id=AUTHORITATIVE_FAMILY_ID,
+        document_id="doc_arch",
+        document_version=1,
+        parse_run_id="prun_arch",
+        archive_scope=True,
+    )
+
+    calls = (
+        lambda: index.replace(archive_scope, entries),
+        lambda: index.search_dense(archive_scope, [0.1] * 4, 5),
+        lambda: index.search_lexical(archive_scope, "quyết định", 5),
+        lambda: index.drop(archive_scope),
+        lambda: index.stats(archive_scope),
+    )
+    for call in calls:
+        with pytest.raises(ValueError, match="must not be an archive wildcard"):
+            call()
