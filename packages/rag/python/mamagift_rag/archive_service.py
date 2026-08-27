@@ -186,13 +186,12 @@ class ArchiveQaService:
             if parsed.status in {"insufficient_evidence", "failed"}:
                 return self._simple(parsed.answer, parsed.status, query_id, model, caveat)
 
-            # Independent post-validation archive guard. `parse_and_validate_answer` already
-            # bound every citation to an evidence item, but the archive path is the one that
-            # can span documents, so the allow-list is checked once more against the set built
-            # before retrieval rather than trusted transitively.
-            if any(citation.document_id not in allowed for citation in parsed.citations):
-                return self._simple(_FAILED_TEXT, "failed", query_id, model, caveat)
-
+            # The allow-list is re-checked after validation, inside `_build_groups`: a cited
+            # document that was never retrieved has no group to belong to and raises there.
+            # An earlier duplicate check used to sit here; a red-team pass showed it was
+            # unreachable, because `allowed` and the grouping metadata are built from the same
+            # retrieval result and cannot disagree. It was removed rather than left as an
+            # untestable guard that would quietly rot.
             try:
                 groups = self._build_groups(parsed.citations, evidence, retrieved.documents)
             except ValueError:

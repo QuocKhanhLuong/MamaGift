@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, date, datetime
+from unittest import mock
 
 import pytest
 from sqlalchemy import create_engine
@@ -18,6 +19,7 @@ from mamagift_rag.archive_service import (
     ArchiveQaService,
     ArchiveRelationRef,
 )
+from mamagift_rag.schema import Citation, ModelRef, QaAnswer, RetrievalRef
 from mamagift_rag.service import QaService
 from mamagift_retrieval.archive.protocol import AUTHORITATIVE_FAMILY_ID
 from mamagift_retrieval.archive.sql_archive_index import SqlArchiveIndex
@@ -392,3 +394,81 @@ def test_budget_is_spent_from_the_archive_category(
     usage = {c.category: c for c in evidence.budget.categories}
     assert usage["archive_semantic"].used_chars > 0
     assert usage["selected_document"].used_chars == 0
+
+
+def test_post_validation_allow_list_catches_a_citation_validation_escape(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """A citation for a document that was never retrieved can never reach the client.
+
+    Validation is stubbed to wave one through, simulating a bug in citation validation. The
+    answer must come back 'failed' with nothing cited, because a citation whose document was
+    not retrieved has no group to belong to and would be unopenable in the UI.
+    """
+    _two_documents(session_factory)
+    service = _service(
+        session_factory,
+        FakeChatProvider(responses=[_answer_json([{"citation_id": "c1"}])]),
+    )
+
+    escaped = QaAnswer(
+        answer="Câu trả lời vượt rào.",
+        status="answered",
+        citations=[
+            Citation(
+                citation_id="c1",
+                document_id="doc_never_retrieved",
+                page_number=1,
+                block_ids=["blk"],
+                quote=None,
+            )
+        ],
+        retrieval=RetrievalRef(query_id="q"),
+        model=ModelRef(provider="p", model="m", version="v"),
+    )
+
+    with mock.patch("mamagift_rag.archive_service.parse_and_validate_answer", return_value=escaped):
+        result = asyncio.run(service.answer("tuyển sinh", scope=_archive_scope()))
+
+    assert result.status == "failed"
+    assert result.citations == []
+    assert result.document_groups == []
+
+
+def test_grouping_failure_is_reported_as_failed_not_as_a_partial_answer(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """A citation that lands in no document group would be unreachable in the UI.
+
+    The service must refuse the whole answer rather than return citations the reader cannot
+    open. Validation is stubbed to return a citation whose id is not in the evidence set.
+    """
+    _two_documents(session_factory)
+    service = _service(
+        session_factory,
+        FakeChatProvider(responses=[_answer_json([{"citation_id": "c1"}])]),
+    )
+
+    ungroupable = QaAnswer(
+        answer="Câu trả lời không nhóm được.",
+        status="answered",
+        citations=[
+            Citation(
+                citation_id="c_not_in_evidence",
+                document_id="doc_a",
+                page_number=1,
+                block_ids=["blk"],
+                quote=None,
+            )
+        ],
+        retrieval=RetrievalRef(query_id="q"),
+        model=ModelRef(provider="p", model="m", version="v"),
+    )
+
+    with mock.patch(
+        "mamagift_rag.archive_service.parse_and_validate_answer", return_value=ungroupable
+    ):
+        result = asyncio.run(service.answer("tuyển sinh", scope=_archive_scope()))
+
+    assert result.status == "failed"
+    assert result.citations == []
