@@ -4,6 +4,20 @@ This file is the factual execution tracker for MamaGift. Update it at the end of
 
 ## Current active phase
 
+**Phase 5 — Cross-document institutional memory**
+
+Status: `COMPLETE`
+
+Known blocker: real scanned-document production evidence — ADR-001 `PENDING EVIDENCE`
+Known blocker: live Supabase verification — `NOT_RUN / BLOCKED_BY_CREDENTIALS`
+
+Archive-level grounded QA works end to end across many current documents, with citations
+grouped by source document and verifiable to page and block, on SQLite and on PostgreSQL +
+pgvector. See the Phase 5 exit-evidence entry at the end of this file for the measured
+numbers and the honest limitations.
+
+### Previously active phase
+
 **Phase 4 — Self-hosted LLM and grounded single-document Q&A**
 
 Status: `COMPLETE`
@@ -92,8 +106,8 @@ production parser. Running the private benchmark is what closes both phases.
 | 3 | Document archive and verification-first web UX | IN_PROGRESS | Baseline `d8edafe` plus hardening `e7cc7a8`/`c75c489`; local Phase 3 gates complete, including desktop E2E and tablet/mobile smoke; inherits Phase 1/2's undecided parser strategy |
 | 3.5 | Evaluation + Retrieval Foundation | COMPLETE | see entry below; deterministic foundation only — no embeddings, vector store, reranker, memory backend or LLM |
 | 4 | Self-hosted LLM and grounded single-document Q&A | COMPLETE | see entry below; grounded QA green end to end on born-digital/synthetic fixtures only. Known blocker: real scanned-document evidence (ADR-001) |
-| 5 | Cross-document institutional memory | IN_PROGRESS | Phase 4 is COMPLETE, so Phase 5 is unblocked; see the Phase 5 plan in `docs/superpowers/plans/` |
-| 6 | Feedback dataset and offline continual OCR/domain adaptation | BLOCKED_BY_PHASE_5 | — |
+| 5 | Cross-document institutional memory | COMPLETE | see entry below; archive QA green on born-digital/synthetic fixtures, on SQLite and on PostgreSQL+pgvector. Known blockers: ADR-001 scanned-document evidence; live Supabase NOT_RUN |
+| 6 | Feedback dataset and offline continual OCR/domain adaptation | NOT_STARTED | Phase 5 is COMPLETE; Phase 6 was deliberately not begun in this run |
 | 7 | Production hardening and low-cost deployment | BLOCKED_BY_PHASE_6 | — |
 | 8 | Meeting assistant | PARKED | document product must be stable/useful first |
 
@@ -552,3 +566,98 @@ independently validated.
 - CI job definitions are present but no remote GitHub Actions run was observed.
 - The real self-hosted model and a real RAGAS run are offline operator evidence only;
   neither has been executed, and neither is required by CI.
+
+### Phase 5 completed — 2026-08-27
+
+**Phase 5 — Cross-document institutional memory**
+
+Status: `COMPLETE`
+
+Known blocker: real scanned-document production evidence — ADR-001 `PENDING EVIDENCE`
+Known blocker: live Supabase verification — `NOT_RUN / BLOCKED_BY_CREDENTIALS`
+
+Exact `/goal`:
+
+> Answer archive-level questions across newly ingested documents without relying on the
+> LLM training cutoff.
+
+Base commit: `0b26b97`. Final commit: `bb3c0b60386688ef22f9bf156ad58ab5104d9a20`.
+Plan: `docs/superpowers/plans/2026-08-27-phase-5-cross-document-institutional-memory.md`.
+
+#### What was built
+
+Archive retrieval is a scope-parallel sibling of the Phase 4 single-document stack, not a
+generalisation of it. `ArchiveIndex` requires an archive wildcard and refuses a pinned
+document; `DocumentIndex` requires a document and now explicitly refuses an archive wildcard.
+Selected-document QA is therefore structurally incapable of cross-document retrieval, and
+archive QA cannot collapse into one global index. Every stage downstream of retrieval reuses
+Phase 4 code unchanged — `RRF_K`, `tokenize_vi`, the `Reranker` protocol,
+`build_grounded_prompt`, `parse_and_validate_answer` — so there is one RAG stack with two
+scopes, not two stacks.
+
+Current-version isolation is an invariant, not a filter: every archive query starts from one
+`_current_version_select()` requiring BOTH `parse_runs.is_current` AND
+`documents.current_parse_run_id = parse_runs.id`, and no parameter can relax either.
+
+#### Local gate — all green
+
+- `make check` **PASS** (includes the new `archive-retrieval-tests`, `archive-qa-tests`,
+  `archive-security-tests`, `pgvector-integration` and `archive-retrieval-eval` targets).
+- SQLite: **1329 passed**, 31 skipped.
+- PostgreSQL 16 + pgvector 0.8.6: **1358 passed**, 2 skipped.
+- Browser E2E: **14 passed**, including two new archive-assistant journeys.
+- `mypy` clean on 118 source files; `ruff format`/`check` clean; `git diff --check` clean.
+- Migrations 0005/0006/0007 verified upgrade-from-empty, upgrade-from-populated-Phase-4,
+  and full `downgrade base` on real PostgreSQL. No runtime `create_all` anywhere.
+
+#### Measured retrieval evidence
+
+`docs/eval/phase-5-baseline.md`, 19 synthetic sanitized cases, four modes. Identical
+retrieval metrics on SQLite and PostgreSQL; only latency differs.
+
+| Mode | Recall@1 | Recall@5 | MRR | nDCG@10 | Stale leak | Wrong-doc leak | Filter acc | P50 | P95 |
+|---|---|---|---|---|---|---|---|---|---|
+| lexical | 0.8947 | 1.0000 | 0.9737 | 0.9764 | 0.0 | 0.0 | 1.0 | 1.65 ms | 6.72 ms |
+| dense | 0.8947 | 1.0000 | 0.9737 | 0.9764 | 0.0 | 0.0 | 1.0 | 7.36 ms | 18.24 ms |
+| hybrid | 0.8947 | 1.0000 | 0.9605 | 0.9658 | 0.0 | 0.0 | 1.0 | 10.10 ms | 25.44 ms |
+| hybrid+rerank | 0.8947 | 0.9474 | 0.9474 | 0.9409 | 0.0 | 0.0 | 1.0 | 12.46 ms | 32.34 ms |
+
+(PostgreSQL + pgvector run. Exact search only; no ANN index was added, and none is justified
+at this corpus size or latency.)
+
+#### Defects this phase found and fixed
+
+- **Chunk metadata was destroyed on write.** The Kế hoạch chunker binds each task's owner and
+  deadline to that task as `Chunk.metadata`, but `document_chunks` had no column for it, so
+  `SqlDocumentIndex.replace` dropped it silently. The task→owner→deadline association existed
+  in the chunker and nowhere else. Phase 4 never noticed because single-document QA read only
+  chunk text. Fixed by migration 0007 plus rendering those fields into the evidence a model
+  sees.
+- **The shipped rerankers could not rerank an archive.** Both validate their own input with
+  the single-document validator, so archive retrieval crashed as soon as it fused two
+  documents. Every unit test had passed in isolation; a worker had hidden it behind a local
+  test double. Fixed with an explicit `cross_document` flag and a construction-time refusal.
+- **CI would have failed on migration 0005.** Both PostgreSQL services used
+  `postgres:16-alpine`, which has no pgvector. Fixed to `pgvector/pgvector:pg16`.
+- **A duplicate citation allow-list check was unreachable.** Removed rather than left as an
+  untestable guard, with the reachable one covered by a new test.
+
+#### Honest limitations
+
+- **The reranker question is not answered.** `FakeReranker` is a deterministic shuffle, and
+  the table above shows it making ranking worse. That is evidence about the stub, not about
+  the production cross-encoder. The API serves `CrossEncoderReranker` outside tests precisely
+  because the fake is worse than not reranking. Settling it needs the self-hosted worker and
+  is offline operator evidence, not a CI gate.
+- **Retrieval quality is not measured with a real model.** Embeddings in CI are deterministic
+  hashes, not BGE-M3. The recall numbers measure plumbing, not model quality.
+- **Live Supabase is `NOT_RUN`.** No project ref, credential, config file or CLI is reachable
+  from this machine (`docs/phase-5/supabase-discovery.md`). All evidence is from local
+  PostgreSQL 16 + pgvector 0.8.6. The anonymous Data-API exposure probe exists and skips with
+  a reason; the structural half — no Supabase client, anon key or database URL in the web
+  bundle, and `fetch` only in the API client — runs and passes.
+- **OCR is unchanged and still blocking.** Every Phase 5 fixture is born-digital or synthetic.
+  Nothing here makes a real scanned Vietnamese document answerable, and Phases 1, 2 and 3 stay
+  `IN_PROGRESS` for that reason.
+- **RAGAS remains supplemental** and was not run; it gates nothing.
+- CI job definitions are present but no remote GitHub Actions run was observed.
